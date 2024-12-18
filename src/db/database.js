@@ -1,7 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const dbPath = path.join(__dirname, '..', '..', 'lecture_notes_2.db');
+const dbPath = path.join(__dirname, '..', '..', 'lecture_notes.db');
 const db = new sqlite3.Database(dbPath);
 
 db.serialize(() => {
@@ -12,17 +12,19 @@ db.serialize(() => {
         file_name TEXT,
         latex_output TEXT,
         transcription TEXT,
+        refined TEXT DEFAULT '',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
 });
 
-function addProcessedVideo(fileId, fileName, latexOutput, transcription) {
+function addProcessedVideo(fileId, fileName, latexOutput, transcription, refined) {
   return new Promise((resolve, reject) => {
     db.run(
-      `INSERT OR REPLACE INTO processed_videos (file_id, file_name, latex_output, transcription) 
-      VALUES (?, ?, ?, ?)`,
-      [fileId, fileName, latexOutput, transcription],
+      `INSERT OR REPLACE INTO processed_videos (file_id, file_name, latex_output, transcription, refined) 
+      VALUES (?, ?, ?, ?, ?)`,
+      [fileId, fileName, latexOutput, transcription, refined||''],
       function (err) {
         if (err) {
           reject(err);

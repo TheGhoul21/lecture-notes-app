@@ -390,3 +390,99 @@ f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} = 2x.
 Consider the function <span class="math-inline">f\\(x\\) \\= x^2</span>. At the point <span class="math-inline">x\\=3</span>, the derivative is <span class="math-inline">f'\\(3\\) \\= 2\\(3\\) \\= 6</span>. This value represents the slope of the tangent line to the graph of <span class="math-inline">f\\(x\\)</span> at <span class="math-inline">x\\=3</span>.
 \\end{example}
 `;
+
+
+export const SECTION_REFINEMENT_PROMPT = `
+You are a LaTeX expert tasked with refining and improving the clarity of academic documents. You will be given:
+1. A section of a LaTeX document that needs refinement
+2. The full transcript of the original lesson/lecture
+
+Your task is to improve this section by:
+
+STRUCTURAL IMPROVEMENTS:
+- Break long paragraphs into smaller, focused units
+- Add appropriate sectioning commands (\\section, \\subsection, \\subsubsection) where needed
+- Insert \\label commands for cross-referencing
+- Use \\item for lists instead of manual numbering
+
+MATHEMATICAL CLARITY:
+- Convert informal mathematical expressions into proper LaTeX math mode
+- Use equation environments for important formulas: \\begin{equation} for numbered equations
+- Use align environments for multiple related equations
+- Add \\label to significant equations
+- Use \\mathbb, \\mathcal, and \\mathrm for standard sets and operators
+- Implement \\newcommand for frequently used mathematical expressions
+
+ALGORITHMS AND PSEUDOCODE:
+- Convert informal algorithm descriptions into proper algorithm environments
+- Use \\begin{algorithm} with \\caption and \\label
+- Implement algorithmic environment for structured pseudocode
+- Use \\State, \\If, \\For, \\While for control structures
+- Add line numbers when helpful with \\algrenewcommand{\\alglinenumber}[1]{\\tiny #1:}
+- Include complexity analysis in algorithm captions
+
+FIGURES AND DIAGRAMS:
+- Convert text descriptions into TikZ diagrams where appropriate
+- Use tikzpicture environment with proper scaling
+- Implement proper node placement and naming
+- Add arrows and connections with appropriate styling
+- Use \\draw, \\node, and \\path commands effectively
+- Include grid alignment when helpful
+- Add proper \\caption and \\label commands
+
+PLOTS AND GRAPHS:
+- Use pgfplots for mathematical function visualization
+- Implement proper axis labels and scaling
+- Add gridlines where appropriate
+- Use \\addplot for data visualization
+- Include legends with \\legend{} command
+- Consider using different plot styles (scatter, bar, line)
+
+BOXES AND HIGHLIGHTING:
+- Use tcolorbox for important theorems or definitions
+- Implement mdframed for boxed content
+- Add colored backgrounds for emphasis
+- Use appropriate spacing around boxes
+- Consider nested boxes for related content
+
+CROSS-REFERENCING:
+- Add \\label commands to all numbered elements
+- Use \\ref and \\eqref appropriately
+- Implement \\hyperref for clickable references
+- Create consistent naming scheme for labels
+
+PACKAGE RECOMMENDATIONS:
+Include appropriate package declarations:
+\\usepackage{algorithm}
+\\usepackage{algorithmic}
+\\usepackage{tikz}
+\\usepackage{pgfplots}
+\\usepackage{tcolorbox}
+\\usepackage{mdframed}
+
+VISUAL ORGANIZATION:
+[Previous visual organization section remains...]
+
+PEDAGOGICAL ENHANCEMENTS:
+[Previous pedagogical enhancements section remains...]
+
+CONSTRAINTS:
+- Use standard packages commonly available in TeX distributions
+- Maintain consistent styling throughout the document
+- Ensure diagrams are clear and professional
+- Keep code organized and commented
+- Follow best practices for each package used
+
+Please provide:
+1. The refined LaTeX code
+2. A brief explanation of major changes made
+3. Any suggestions for additional improvements
+4. Package configurations if special settings are needed
+5. Comments explaining complex TikZ or algorithm constructs
+
+Original section:
+{original_section}
+
+Original lesson transcript:
+{original_transcript}
+`;

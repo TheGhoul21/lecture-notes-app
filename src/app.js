@@ -2,7 +2,7 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSection } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./ui');
 const path = require('path');
@@ -29,7 +29,111 @@ async function ensureTempDir() {
   }
 }
 
-async function processVideos(format='audio') {
+async function selectSections(sections) {
+  const choices = sections.map((section, index) => ({
+    name: `Section ${index + 1}: ${section.trim().substring(0, 50)}...`,
+    value: index,
+  }));
+
+  const { selectedSections } = await require('inquirer').default.prompt({
+    type: 'checkbox',
+    message: 'Select sections to refine (press space to select, enter to confirm)',
+    name: 'selectedSections',
+    choices,
+    pageSize: 10,
+  });
+
+  return selectedSections.map((index) => ({ index, section: sections[index] }));
+}
+
+function extractLatex(text) {
+  const startDelimiter = "```latex";
+  const endDelimiter = "```";
+  const startIndex = text.indexOf(startDelimiter);
+  if (startIndex === -1) {
+    return text;
+  }
+  const endIndex = Math.max(text.indexOf(endDelimiter, startIndex + startDelimiter.length), 0);
+  // if (endIndex === -1) {
+  //   return null;
+  // }
+  return text.substring(startIndex + startDelimiter.length, endIndex).trim();
+}
+
+// src/app.js
+
+function splitTranscription(transcription) {
+  const preambleRegex = /\\documentclass.*?\\begin{document}/s;
+  const preambleMatch = transcription.match(preambleRegex);
+  let content = transcription;
+  if (preambleMatch) {
+    content = transcription.substring(preambleMatch[0].length);
+  }
+
+
+  const endDocumentIndex = content.indexOf("\\end{document}");
+  if (endDocumentIndex !== -1) {
+    content = content.substring(0, endDocumentIndex);
+  }
+
+
+  const sectionRegex = /(\\section\{[^{}]*\}[\s\S]*?)(?=\\section\{|\s*\\end{document}|$)/g;
+
+  const sections = [];
+  let match;
+  while ((match = sectionRegex.exec(content)) !== null) {
+    sections.push(match[1].trim());
+  }
+
+  return sections.filter(section => section.trim() !== '');
+}
+
+async function refineProcessedVideo() {
+  const processedVideos = await getProcessedVideos();
+  const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to refine');
+
+  if (!selectedVideoId) return;
+
+  const video = await getProcessedVideo(selectedVideoId);
+  if (!video) {
+    console.log("video not found");
+    return;
+  }
+
+  let refinedLatex = extractLatex(video.latex_output);
+  const sections = splitTranscription(refinedLatex);
+  const selectedSections = await selectSections(sections);
+
+  let headers = "";
+
+  for (const { index, section } of selectedSections) {
+    const refinedSection = extractLatex(await refineSection(video.transcription, section));
+    if (refinedSection) {
+      if (!headers) {
+        const match = refinedSection.match(/\\documentclass.*?\\begin{document}/s);
+        if (match) {
+          headers = match[0];
+        }
+      }
+      const trimmedRefined = refinedSection.replace(/\\documentclass.*?\\begin{document}/s, '').replace(/\\end{document}/, '').trim();
+      refinedLatex = refinedLatex.replace(section, trimmedRefined);
+    }
+  }
+
+  await showSectionPreview(video.latex_output, refinedLatex);
+
+
+
+  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, refinedLatex);
+
+  console.log("Refinement process complete")
+}
+
+
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+async function processVideos(format = 'audio') {
   await ensureTempDir();
   const authClient = await authorize();
   const videos = await listVideoFiles(authClient);
@@ -75,7 +179,7 @@ async function processVideos(format='audio') {
       }
       console.log(`Number of audios that wil be used ${audioPaths.length}`)
 
-      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'));
+      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'), '');
       break;
     case 'transcript':
       for (const video of selectedVideos) {
@@ -97,7 +201,7 @@ async function processVideos(format='audio') {
       }
 
       console.log(`Number of transcription that wil be used ${transcriptions.length}`)
-      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'));
+      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
       break;
     default: throw new Error("format \"" + format + "\" not supported");
   }
@@ -115,6 +219,21 @@ async function viewProcessedVideos() {
   }
 }
 
+async function showSectionPreview(originalSection, refinedSection, index) {
+  import('chalk').then(async ({ default: chalk }) => {
+    index && console.log(chalk.blue(`\n--- Section ${index + 1} Preview ---`));
+    console.log(chalk.green(`\nOriginal Section:\n`));
+    console.log(originalSection);
+
+    if (refinedSection) {
+      console.log(chalk.blue('\nRefined Section:'));
+      console.log(chalk.yellow(refinedSection));
+    } else {
+      console.log(chalk.yellow('\nNo refinement available for this section yet.'));
+    }
+  });
+}
+
 
 async function main() {
   try {
@@ -129,6 +248,7 @@ async function main() {
         choices: [
           { name: 'Process new videos (transcript)', value: 'process_transcript' },
           { name: 'Process new videos (audio)', value: 'process_audio' },
+          { name: 'Refine a processed video', value: 'refine' },
           { name: 'View processed videos', value: 'view' },
           { name: 'Exit', value: 'exit' },
         ],
@@ -138,10 +258,13 @@ async function main() {
         case 'process_transcript':
           await processVideos('transcript');
           break;
-          case 'process_audio':
-            await processVideos('audio');
-            break;
-  
+        case 'process_audio':
+          await processVideos('audio');
+          break;
+        case 'refine':
+          await refineProcessedVideo();
+          break;
+
         case 'view':
           await viewProcessedVideos();
           break;

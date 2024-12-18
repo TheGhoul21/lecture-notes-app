@@ -6,7 +6,7 @@ const {
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 
 const config = require('../utils/config');
-const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO } = require("./prompts");
+const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT } = require("./prompts");
 
 const apiKey = config.geminiApiKey;
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -101,5 +101,26 @@ async function generateLatexFromAudio(audioPaths) {
 }
 
 
+async function refineSection(originalTranscript, section) {
+  const prompt = SECTION_REFINEMENT_PROMPT.replace(
+      "{original_transcript}",
+      originalTranscript
+    ).replace("{original_section}", section);
 
-module.exports = { generateLatexFromTranscription, generateLatexFromAudio };
+  const model = genAI.getGenerativeModel({
+      model: "gemini-exp-1206",
+      systemInstruction: "You are an expert latex editor",
+    });
+    const chatSession = model.startChat({
+      generationConfig,
+      history: [],
+    });
+
+    const result = await chatSession.sendMessage(prompt);
+    return result.response.text();
+}
+
+
+
+
+module.exports = { generateLatexFromTranscription, generateLatexFromAudio, refineSection };
