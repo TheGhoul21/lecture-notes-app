@@ -2,7 +2,7 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement, extractLatex } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./ui');
 const path = require('path');
@@ -46,20 +46,6 @@ async function selectSections(sections) {
   return selectedSections.map((index) => ({ index, section: sections[index] }));
 }
 
-function extractLatex(text) {
-  const startDelimiter = "```latex";
-  const endDelimiter = "```";
-  const startIndex = text.indexOf(startDelimiter);
-  if (startIndex === -1) {
-    return text;
-  }
-  const endIndex = Math.max(text.indexOf(endDelimiter, startIndex + startDelimiter.length), 0);
-  // if (endIndex === -1) {
-  //   return null;
-  // }
-  return text.substring(startIndex + startDelimiter.length, endIndex).trim();
-}
-
 // src/app.js
 
 function splitTranscription(transcription) {
@@ -89,6 +75,7 @@ function splitTranscription(transcription) {
 }
 
 async function refineProcessedVideo() {
+  await ensureTempDir();
   const processedVideos = await getProcessedVideos();
   const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to refine');
 
@@ -144,9 +131,7 @@ async function refineProcessedVideo() {
 
   }
 
-
-
-  let finalLatex =  refinedLatex;
+  let finalLatex =  selectedSections.length ? refinedLatex : (video.refined||refinedLatex);
   if(finalHeaders){
        const existingHeaderMatch = finalLatex.match(/\\documentclass.*?\\begin{document}/s);
         if(existingHeaderMatch) {
@@ -162,6 +147,7 @@ async function refineProcessedVideo() {
 
   console.log("Refinement process complete")
 }
+
 
 
 function escapeRegex(string) {

@@ -5,6 +5,13 @@ const {
 } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 
+
+const fs = require('fs').promises;
+const fs2 = require('fs');
+const path = require('path');
+const latex = require('node-latex')
+
+
 const config = require('../utils/config');
 const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT, FINAL_REFINEMENT_PROMPT } = require("./prompts");
 
@@ -153,23 +160,135 @@ async function refineSection(originalTranscript, section) {
 }
 
 
+async function compileLatex(latexDocument) {
+
+
+  return new Promise(async (resolve, error) => {
+
+    const tempDir = path.join(__dirname, '..', '..', 'temp');
+    const texFilePath = path.join(tempDir, 'temp.tex');
+    const pdfFilePath = path.join(tempDir, 'output.pdf');
+
+    try {
+      await fs.writeFile(texFilePath, latexDocument);
+    } catch (err) {
+      console.error("Error writing temp latex file", err);
+      return null;
+    }
+
+
+    const input = fs2.createReadStream(texFilePath)
+    const output = fs2.createWriteStream(pdfFilePath)
+    const pdf = latex(input)
+
+    pdf.on('error', err => {
+      if (err.message.includes('LaTeX Syntax Error'))
+        resolve(err.message);
+    })
+    pdf.on('finish', () => {
+      console.log('PDF generated!')
+      resolve(pdfFilePath);
+    })
+
+    pdf.pipe(output)
+
+  })
+
+
+
+
+
+
+
+
+  // try {
+  //   const pdf = await pdflatex(latexDocument, {});
+  //   await fs.writeFile(pdfFilePath, pdf);
+  //   return pdfFilePath;
+  // } catch (error) {
+  //   console.error(JSON.stringify(error));
+  //   console.error('LaTeX compilation error:', error);
+  //   return error;
+  // } finally{
+  //    try {
+  //       await fs.unlink(texFilePath);
+  //   } catch (e) {
+  //       console.warn("Error unlinking file", e);
+  //   }
+  // }
+}
+function extractLatex(text) {
+  const startDelimiter = "```latex";
+  const endDelimiter = "```";
+  const startIndex = text.indexOf(startDelimiter);
+  if (startIndex === -1) {
+    return text;
+  }
+  const endIndex = Math.max(text.indexOf(endDelimiter, startIndex + startDelimiter.length), 0);
+  // if (endIndex === -1) {
+  //   return null;
+  // }
+  return text.substring(startIndex + startDelimiter.length, endIndex).trim();
+}
+
+
 async function finalRefinement(document) {
-  const prompt = FINAL_REFINEMENT_PROMPT.replace("{document}", document);
+  const prompt = FINAL_REFINEMENT_PROMPT;
   console.log("Final refinement");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-exp-1206",
-    systemInstruction: "You are an expert LaTeX editor",
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: prompt
   });
+
   const chatSession = model.startChat({
     generationConfig,
     history: [],
   });
-  const result = await chatSession.sendMessage(prompt);
-  return result.response.text();
+
+
+  let currentDocument = document;
+  const maxIterations = 10;
+  let previousErrors = new Set();
+  let messageToSend = currentDocument;
+
+  const fixedDocument = extractLatex(currentDocument);
+  await compileLatex(fixedDocument);
+
+
+  for (let i = 0; i < maxIterations; i++) {
+    if (i > 0) {
+      console.log("Sending message", messageToSend, "to Gemini");
+    }
+    const result = await chatSession.sendMessage(messageToSend);
+    const fixedDocument = extractLatex(result.response.text());
+    console.log(fixedDocument);
+    const compilationResult = await compileLatex(fixedDocument);
+
+    if (typeof compilationResult === 'string' && compilationResult.endsWith('.pdf')) {
+      console.log(`LaTeX document fixed after ${i + 1} iterations`);
+      return fixedDocument;
+    }
+    if (typeof compilationResult == 'string') {
+      const errorString = compilationResult;
+      messageToSend = errorString;
+      if (previousErrors.has(errorString)) {
+        console.log(`Same error detected after ${i + 1} iterations. Aborting`);
+        return currentDocument;
+      }
+      previousErrors.add(errorString);
+      currentDocument = fixedDocument;
+    } else {
+      console.log("Unknown error during compilation");
+      return currentDocument;
+    }
+  }
+  console.log("Max iterations reached. Aborting");
+  return currentDocument;
 }
 
 
 
 
-module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement };
+
+module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement, extractLatex };
