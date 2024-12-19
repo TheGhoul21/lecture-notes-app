@@ -2,7 +2,7 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSection } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./ui');
 const path = require('path');
@@ -104,27 +104,61 @@ async function refineProcessedVideo() {
   const sections = splitTranscription(refinedLatex);
   const selectedSections = await selectSections(sections);
 
-  let headers = "";
+  let newHeaders = [];
+
 
   for (const { index, section } of selectedSections) {
     const refinedSection = extractLatex(await refineSection(video.transcription, section));
+    await showSectionPreview(section, refinedSection, index);
+
     if (refinedSection) {
-      if (!headers) {
-        const match = refinedSection.match(/\\documentclass.*?\\begin{document}/s);
-        if (match) {
-          headers = match[0];
+      const headerMatch = refinedSection.match(/\\documentclass.*?\\begin{document}/s);
+      if (headerMatch) {
+         const newHeader = headerMatch[0];
+        newHeaders.push(newHeader);
         }
-      }
+
+
       const trimmedRefined = refinedSection.replace(/\\documentclass.*?\\begin{document}/s, '').replace(/\\end{document}/, '').trim();
-      refinedLatex = refinedLatex.replace(section, trimmedRefined);
+      const sectionRegex = new RegExp(`\\\\section\\{[^{}]*\\}${escapeRegex(section)}(?=\\\\section\\{|\\\\end{document}|$)`, 's');
+      refinedLatex = refinedLatex.replace(sectionRegex, (match) => {
+          return match.replace(section, trimmedRefined);
+      });
     }
   }
 
-  await showSectionPreview(video.latex_output, refinedLatex);
+
+  let finalHeaders = "";
+  if (newHeaders.length > 0) {
+    const existingHeaderMatch = refinedLatex.match(/\\documentclass.*?\\begin{document}/s);
+    const existingHeader = existingHeaderMatch ? existingHeaderMatch[0] : "";
+    const existingHeaderLines = existingHeader.split('\n').map(line => line.trim());
+
+
+     const uniqueNewHeaderLines = newHeaders.join('\n').split('\n').map(line => line.trim()).filter(line => line !== "").filter(line => !existingHeaderLines.includes(line));
+
+    finalHeaders = uniqueNewHeaderLines.join('\n');
+    if (finalHeaders) {
+      finalHeaders = finalHeaders + "\n";
+    }
+
+  }
 
 
 
-  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, refinedLatex);
+  let finalLatex =  refinedLatex;
+  if(finalHeaders){
+       const existingHeaderMatch = finalLatex.match(/\\documentclass.*?\\begin{document}/s);
+        if(existingHeaderMatch) {
+          finalLatex = finalLatex.replace(existingHeaderMatch[0], finalHeaders);
+        } else {
+           finalLatex = finalHeaders + finalLatex;
+        }
+  }
+
+  finalLatex = extractLatex(await finalRefinement(finalLatex));
+
+  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, finalLatex);
 
   console.log("Refinement process complete")
 }

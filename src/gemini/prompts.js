@@ -400,18 +400,10 @@ You are a LaTeX expert tasked with refining and improving the clarity of academi
 Your task is to improve this section by:
 
 STRUCTURAL IMPROVEMENTS:
-- Break long paragraphs into smaller, focused units
-- Add appropriate sectioning commands (\\section, \\subsection, \\subsubsection) where needed
-- Insert \\label commands for cross-referencing
-- Use \\item for lists instead of manual numbering
+[Previous structural improvements section remains...]
 
 MATHEMATICAL CLARITY:
-- Convert informal mathematical expressions into proper LaTeX math mode
-- Use equation environments for important formulas: \\begin{equation} for numbered equations
-- Use align environments for multiple related equations
-- Add \\label to significant equations
-- Use \\mathbb, \\mathcal, and \\mathrm for standard sets and operators
-- Implement \\newcommand for frequently used mathematical expressions
+[Previous mathematical clarity section remains...]
 
 ALGORITHMS AND PSEUDOCODE:
 - Convert informal algorithm descriptions into proper algorithm environments
@@ -473,16 +465,14 @@ CONSTRAINTS:
 - Keep code organized and commented
 - Follow best practices for each package used
 
-Please provide:
-1. The refined LaTeX code
-2. A brief explanation of major changes made
-3. Any suggestions for additional improvements
-4. Package configurations if special settings are needed
-5. Comments explaining complex TikZ or algorithm constructs
-
-Original section:
-{original_section}
-
 Original lesson transcript:
 {original_transcript}
 `;
+
+export const FINAL_REFINEMENT_PROMPT = (
+    `Please fix the LaTeX errors in the attached document. Additionally, enhance the document's visual presentation by adding boxes, diagrams, and plots where appropriate to improve clarity and understanding
+    Add all the missing commands, packages and whatever you feel like is missing from the preamble. At the end verify that plots, diagrams and pictures are readable, don't go over screen and the labels do not overlap.
+
+
+{document}`);
+
