@@ -36,6 +36,39 @@ const generationConfig = {
   responseMimeType: "text/plain",
 };
 
+async function generateTranscriptionFromAudio(audioPath) {
+
+  const files = [await uploadToGemini(audioPath, 'audio/wav')];
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: "You are an expert lecture transcriber",
+  });
+
+  const textPart = {
+    text: `
+    Can you transcribe this lecture?
+    Format the transcription as a series of complete, grammatically correct sentences.
+    `,
+  };
+  const content = {
+    role: "user",
+    parts: [...files.map(file => ({
+      fileData: {
+        mimeType: file.mimeType,
+        fileUri: file.uri,
+      },
+    })), textPart]
+  };
+
+  const response = await model.generateContent({
+    contents: [content],
+    generationConfig
+  })
+
+  return await response.response.text();
+}
+
 async function generateLatexFromTranscription(transcription) {
 
   const model = genAI.getGenerativeModel({
@@ -54,7 +87,7 @@ async function generateLatexFromTranscription(transcription) {
 async function generateLatexFromAudio(audioPaths) {
 
   const files = [];
-  for(path of audioPaths) {
+  for (path of audioPaths) {
     const file = await uploadToGemini(path, 'audio/wav');
     files.push(file);
   }
@@ -83,18 +116,18 @@ async function generateLatexFromAudio(audioPaths) {
 
   let message = "Generate output"
 
-  for(let i=0; i< numberOfIterations; i++) {
+  for (let i = 0; i < numberOfIterations; i++) {
     const result = await chatSession.sendMessage(message)
     message = "continue or just say ##STOP## if it's already completed";
     const text = result.response.text().trim()
 
-    console.log(text.slice(text.length-20))
-    if(text.endsWith('STOP')) break;
+    console.log(text.slice(text.length - 20))
+    if (text.endsWith('STOP')) break;
 
-    if(text.endsWith("\\end\{document\}\n```")) break;
+    if (text.endsWith("\\end\{document\}\n```")) break;
 
     responses.push(text.replace("##STOP##", ""));
-    if(text.includes("##STOP##")) break;
+    if (text.includes("##STOP##")) break;
   }
 
   return responses.join('\n');
@@ -103,40 +136,40 @@ async function generateLatexFromAudio(audioPaths) {
 
 async function refineSection(originalTranscript, section) {
   const prompt = SECTION_REFINEMENT_PROMPT.replace(
-      "{original_transcript}",
-      originalTranscript
-    );
+    "{original_transcript}",
+    originalTranscript
+  );
 
   const model = genAI.getGenerativeModel({
-      model: "gemini-exp-1206",
-      systemInstruction: prompt,
-    });
-    const chatSession = model.startChat({
-      generationConfig,
-      history: [],
-    });
-    const result = await chatSession.sendMessage(`Original section:\n${section}\n\nProvide the refined LaTeX:\n`);
-    return result.response.text();
+    model: "gemini-exp-1206",
+    systemInstruction: prompt,
+  });
+  const chatSession = model.startChat({
+    generationConfig,
+    history: [],
+  });
+  const result = await chatSession.sendMessage(`Original section:\n${section}\n\nProvide the refined LaTeX:\n`);
+  return result.response.text();
 }
 
 
 async function finalRefinement(document) {
-  const prompt = FINAL_REFINEMENT_PROMPT.replace("{document}",document);
+  const prompt = FINAL_REFINEMENT_PROMPT.replace("{document}", document);
   console.log("Final refinement");
 
   const model = genAI.getGenerativeModel({
-      model: "gemini-exp-1206",
-      systemInstruction: "You are an expert LaTeX editor",
-    });
-    const chatSession = model.startChat({
-      generationConfig,
-      history: [],
-    });
-    const result = await chatSession.sendMessage(prompt);
-    return result.response.text();
+    model: "gemini-exp-1206",
+    systemInstruction: "You are an expert LaTeX editor",
+  });
+  const chatSession = model.startChat({
+    generationConfig,
+    history: [],
+  });
+  const result = await chatSession.sendMessage(prompt);
+  return result.response.text();
 }
 
 
 
 
-module.exports = { generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement };
+module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement };
