@@ -471,8 +471,13 @@ Original lesson transcript:
 
 export const FINAL_REFINEMENT_PROMPT = (
     `Please fix the LaTeX errors in the attached document. Additionally, enhance the document's visual presentation by adding boxes, diagrams, and plots where appropriate to improve clarity and understanding
-    Add all the missing commands, packages and whatever you feel like is missing from the preamble. At the end verify that plots, diagrams and pictures are readable, don't go over screen and the labels do not overlap.
+Add all the missing commands, packages and whatever you feel like is missing from the preamble. At the end verify that plots, diagrams and pictures are readable, don't go over screen and the labels do not overlap.
+Keep in mind this:
 
+1. Use {Uniquely Decodable (UD) Code} instead of [...]. The [...] format is used for optional arguments like key-value pairs and isn't suitable here.
+2. Use {} for Subtitle: The third argument to \\begin{definition} ({}) is reserved for a subtitle or can be left empty.
+3. Plots and diagrams using tikzpicture should be double checked for issues of readability
+4. Don't forget to add all the needed packages like \\usepackage{cleveref} and all the rest.
 
 {document}`);
 
