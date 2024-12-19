@@ -70,7 +70,7 @@ async function generateLatexFromAudio(audioPaths) {
 
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: "gemini-exp-1206",
     systemInstruction: SYSTEM_PROMPT_WITH_AUDIO,
   });
   const chatSession = model.startChat({
