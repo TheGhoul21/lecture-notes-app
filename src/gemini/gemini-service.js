@@ -14,6 +14,7 @@ const latex = require('node-latex')
 
 const config = require('../utils/config');
 const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT, FINAL_REFINEMENT_PROMPT } = require("./prompts");
+const { LatexCompiler } = require("./latex");
 
 const apiKey = config.geminiApiKey;
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -79,7 +80,7 @@ async function generateTranscriptionFromAudio(audioPath) {
 async function generateLatexFromTranscription(transcription) {
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: "gemini-exp-1206",
     systemInstruction: SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   });
   const chatSession = model.startChat({
@@ -94,7 +95,7 @@ async function generateLatexFromTranscription(transcription) {
 async function generateLatexFromAudio(audioPaths) {
 
   const files = [];
-  for (path of audioPaths) {
+  for (let path of audioPaths) {
     const file = await uploadToGemini(path, 'audio/wav');
     files.push(file);
   }
@@ -160,63 +161,42 @@ async function refineSection(originalTranscript, section) {
 }
 
 
+
 async function compileLatex(latexDocument) {
+  const tempDir = path.join(__dirname, '..', '..', 'temp');
+  const texFilePath = path.join(tempDir, 'temp.tex');
 
+  try {
+    await fs.writeFile(texFilePath, latexDocument)
+  } catch (err) {
 
-  return new Promise(async (resolve, error) => {
+  }
+  const compiler = new LatexCompiler({
+    // latexCommand: 'xelatex', // If you want to use xelatex
+    maxRuns: 4
+  });
 
-    const tempDir = path.join(__dirname, '..', '..', 'temp');
-    const texFilePath = path.join(tempDir, 'temp.tex');
-    const pdfFilePath = path.join(tempDir, 'output.pdf');
+  try {
+    const result = await compiler.compile(texFilePath); // Replace with your LaTeX file path
 
-    try {
-      await fs.writeFile(texFilePath, latexDocument);
-    } catch (err) {
-      console.error("Error writing temp latex file", err);
-      return null;
+    if (result.success) {
+      // console.log('PDF compiled successfully!');
+      // console.log('PDF path:', result.pdfPath);
+      return result.pdfPath
+    } else {
+      // console.error('PDF compilation failed!');
+      // console.error('Errors:', result.errors);
+      return result.errors.map(el => JSON.stringify(el)).join('\n')
     }
 
-
-    const input = fs2.createReadStream(texFilePath)
-    const output = fs2.createWriteStream(pdfFilePath)
-    const pdf = latex(input)
-
-    pdf.on('error', err => {
-      if (err.message.includes('LaTeX Syntax Error'))
-        resolve(err.message);
-    })
-    pdf.on('finish', () => {
-      console.log('PDF generated!')
-      resolve(pdfFilePath);
-    })
-
-    pdf.pipe(output)
-
-  })
-
-
-
-
-
-
-
-
-  // try {
-  //   const pdf = await pdflatex(latexDocument, {});
-  //   await fs.writeFile(pdfFilePath, pdf);
-  //   return pdfFilePath;
-  // } catch (error) {
-  //   console.error(JSON.stringify(error));
-  //   console.error('LaTeX compilation error:', error);
-  //   return error;
-  // } finally{
-  //    try {
-  //       await fs.unlink(texFilePath);
-  //   } catch (e) {
-  //       console.warn("Error unlinking file", e);
-  //   }
-  // }
+    console.log('Full Log:\n', result.log);
+  } catch (err) {
+    console.error('An error occurred:', err);
+  } finally {
+    await compiler.cleanup();
+  }
 }
+
 function extractLatex(text) {
   const startDelimiter = "```latex";
   const endDelimiter = "```";
@@ -230,7 +210,6 @@ function extractLatex(text) {
   // }
   return text.substring(startIndex + startDelimiter.length, endIndex).trim();
 }
-
 
 async function finalRefinement(document) {
   const prompt = FINAL_REFINEMENT_PROMPT;
@@ -246,36 +225,31 @@ async function finalRefinement(document) {
     history: [],
   });
 
-
   let currentDocument = document;
-  const maxIterations = 10;
+  const maxIterations = 100;
   let previousErrors = new Set();
   let messageToSend = currentDocument;
 
-  const fixedDocument = extractLatex(currentDocument);
-  await compileLatex(fixedDocument);
-
+  let fixedDocument = extractLatex(currentDocument);
+  let errorLog = await compileLatex(fixedDocument);
 
   for (let i = 0; i < maxIterations; i++) {
     if (i > 0) {
       console.log("Sending message", messageToSend, "to Gemini");
     }
-    const result = await chatSession.sendMessage(messageToSend);
-    const fixedDocument = extractLatex(result.response.text());
-    console.log(fixedDocument);
+    const result = await chatSession.sendMessage("Document: \n" + fixedDocument + "\nError Log:" + errorLog);
+   fixedDocument = extractLatex(result.response.text());
     const compilationResult = await compileLatex(fixedDocument);
+    errorLog = compilationResult;
+    console.log(compilationResult)
 
-    if (typeof compilationResult === 'string' && compilationResult.endsWith('.pdf')) {
+    if (isPdf(compilationResult)) {
       console.log(`LaTeX document fixed after ${i + 1} iterations`);
       return fixedDocument;
     }
-    if (typeof compilationResult == 'string') {
+    if (isErrorString(compilationResult)) {
       const errorString = compilationResult;
       messageToSend = errorString;
-      if (previousErrors.has(errorString)) {
-        console.log(`Same error detected after ${i + 1} iterations. Aborting`);
-        return currentDocument;
-      }
       previousErrors.add(errorString);
       currentDocument = fixedDocument;
     } else {
@@ -285,6 +259,14 @@ async function finalRefinement(document) {
   }
   console.log("Max iterations reached. Aborting");
   return currentDocument;
+}
+
+function isPdf(compilationResult) {
+  return typeof compilationResult === 'string' && compilationResult.endsWith('.pdf');
+}
+
+function isErrorString(compilationResult) {
+  return typeof compilationResult === 'string';
 }
 
 

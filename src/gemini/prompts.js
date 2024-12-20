@@ -289,90 +289,30 @@ Consider the function <span class="math-inline">f\\(x\\) \\= x^2</span>. At the 
 
 
 export const SECTION_REFINEMENT_PROMPT = `
-You are a LaTeX expert tasked with refining and improving the clarity of academic documents. You will be given:
-1. A section of a LaTeX document that needs refinement
-2. The full transcript of the original lesson/lecture
+You are a LaTeX expert tasked with improving academic documents. You will be given:
+1. A LaTeX section needing refinement
+2. The full lesson/lecture transcript
 
-Your task is to improve this section by:
-
-STRUCTURAL IMPROVEMENTS:
-[Previous structural improvements section remains...]
-
-MATHEMATICAL CLARITY:
-[Previous mathematical clarity section remains...]
-
-ALGORITHMS AND PSEUDOCODE:
-- Convert informal algorithm descriptions into proper algorithm environments
-- Use \\begin{algorithm} with \\caption and \\label
-- Implement algorithmic environment for structured pseudocode
-- Use \\State, \\If, \\For, \\While for control structures
-- Add line numbers when helpful with \\algrenewcommand{\\alglinenumber}[1]{\\tiny #1:}
-- Include complexity analysis in algorithm captions
-
-FIGURES AND DIAGRAMS:
-- Convert text descriptions into TikZ diagrams where appropriate
-- Use tikzpicture environment with proper scaling
-- Implement proper node placement and naming
-- Add arrows and connections with appropriate styling
-- Use \\draw, \\node, and \\path commands effectively
-- Include grid alignment when helpful
-- Add proper \\caption and \\label commands
-
-PLOTS AND GRAPHS:
-- Use pgfplots for mathematical function visualization
-- Implement proper axis labels and scaling
-- Add gridlines where appropriate
-- Use \\addplot for data visualization
-- Include legends with \\legend{} command
-- Consider using different plot styles (scatter, bar, line)
-
-BOXES AND HIGHLIGHTING:
-- Use tcolorbox for important theorems or definitions
-- Implement mdframed for boxed content
-- Add colored backgrounds for emphasis
-- Use appropriate spacing around boxes
-- Consider nested boxes for related content
-
-CROSS-REFERENCING:
-- Add \\label commands to all numbered elements
-- Use \\ref and \\eqref appropriately
-- Implement \\hyperref for clickable references
-- Create consistent naming scheme for labels
-
-PACKAGE RECOMMENDATIONS:
-Include appropriate package declarations:
-\\usepackage{algorithm}
-\\usepackage{algorithmic}
-\\usepackage{tikz}
-\\usepackage{pgfplots}
-\\usepackage{tcolorbox}
-\\usepackage{mdframed}
-
-VISUAL ORGANIZATION:
-[Previous visual organization section remains...]
-
-PEDAGOGICAL ENHANCEMENTS:
-[Previous pedagogical enhancements section remains...]
-
-CONSTRAINTS:
-- Use standard packages commonly available in TeX distributions
-- Maintain consistent styling throughout the document
-- Ensure diagrams are clear and professional
-- Keep code organized and commented
-- Follow best practices for each package used
+Your task:
+- Refine structure, improve mathematical clarity, and enhance algorithms using proper environments (e.g., \\begin{algorithm}, \\State).
+- Convert informal pseudocode into structured algorithms, include complexity analysis, and add line numbers where needed.
+- Turn text descriptions into TikZ diagrams, ensuring proper scaling, node placement, and labeling.
+- Use pgfplots for graphs with proper labels, legends, and scaling.
+- Box important content using tcolorbox or mdframed with appropriate emphasis and spacing.
+- Implement cross-referencing with \\label, \\ref, and \\hyperref.
+- Use the full transcript to ensure all relevant information is included and described clearly in the document. Add any missing details, expand on ambiguous points, and clarify unclear statements from the transcript.
+- Ensure consistent styling, clarity, and use of standard packages (algorithm, tikz, pgfplots, tcolorbox, mdframed).
 
 Original lesson transcript:
 {original_transcript}
 `;
 
+
+
 export const FINAL_REFINEMENT_PROMPT = (
     `Please fix the LaTeX errors in the attached document. Additionally, enhance the document's visual presentation by adding boxes, diagrams, and plots where appropriate to improve clarity and understanding
 Add all the missing commands, packages and whatever you feel like is missing from the preamble. At the end verify that plots, diagrams and pictures are readable, don't go over screen and the labels do not overlap.
-Keep in mind this:
+Convert mathematical statements (theorems, definitions, examples, remarks, algorithms) to LaTeX tcolorboxes. Use these styles: Theorem (red), Definition (green), Example (purple), Remark (gray), Algorithm (blue). Format: \begin{tcolorbox}[title=<Title>, colback=<Background>, colframe=<Frame>] <Content> \end{tcolorbox}. Preserve content. Use generic titles if none provided.
 
-1. Use {Uniquely Decodable (UD) Code} instead of [...]. The [...] format is used for optional arguments like key-value pairs and isn't suitable here.
-2. Use {} for Subtitle: The third argument to \\begin{definition} ({}) is reserved for a subtitle or can be left empty.
-3. Plots and diagrams using tikzpicture should be double checked for issues of readability
-4. Don't forget to add all the needed packages like \\usepackage{cleveref} and all the rest.
 `);
 

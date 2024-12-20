@@ -8,6 +8,11 @@ const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./u
 const path = require('path');
 const fs = require('fs').promises;
 
+const fs2 = require('fs');
+const latex = require('node-latex');
+const { LatexCompiler } = require('./gemini/latex');
+
+
 const GENERATION_FORMAT = 'audio';
 
 const tempDir = path.join(__dirname, '..', 'temp');
@@ -101,15 +106,15 @@ async function refineProcessedVideo() {
     if (refinedSection) {
       const headerMatch = refinedSection.match(/\\documentclass.*?\\begin{document}/s);
       if (headerMatch) {
-         const newHeader = headerMatch[0];
+        const newHeader = headerMatch[0];
         newHeaders.push(newHeader);
-        }
+      }
 
 
       const trimmedRefined = refinedSection.replace(/\\documentclass.*?\\begin{document}/s, '').replace(/\\end{document}/, '').trim();
       const sectionRegex = new RegExp(`\\\\section\\{[^{}]*\\}${escapeRegex(section)}(?=\\\\section\\{|\\\\end{document}|$)`, 's');
       refinedLatex = refinedLatex.replace(sectionRegex, (match) => {
-          return match.replace(section, trimmedRefined);
+        return match.replace(section, trimmedRefined);
       });
     }
   }
@@ -122,7 +127,7 @@ async function refineProcessedVideo() {
     const existingHeaderLines = existingHeader.split('\n').map(line => line.trim());
 
 
-     const uniqueNewHeaderLines = newHeaders.join('\n').split('\n').map(line => line.trim()).filter(line => line !== "").filter(line => !existingHeaderLines.includes(line));
+    const uniqueNewHeaderLines = newHeaders.join('\n').split('\n').map(line => line.trim()).filter(line => line !== "").filter(line => !existingHeaderLines.includes(line));
 
     finalHeaders = uniqueNewHeaderLines.join('\n');
     if (finalHeaders) {
@@ -131,15 +136,16 @@ async function refineProcessedVideo() {
 
   }
 
-  let finalLatex =  selectedSections.length ? refinedLatex : (video.refined||refinedLatex);
-  if(finalHeaders){
-       const existingHeaderMatch = finalLatex.match(/\\documentclass.*?\\begin{document}/s);
-        if(existingHeaderMatch) {
-          finalLatex = finalLatex.replace(existingHeaderMatch[0], finalHeaders);
-        } else {
-           finalLatex = finalHeaders + finalLatex;
-        }
+  let finalLatex = selectedSections.length ? refinedLatex : (video.refined || refinedLatex);
+  if (finalHeaders) {
+    const existingHeaderMatch = finalLatex.match(/\\documentclass.*?\\begin{document}/s);
+    if (existingHeaderMatch) {
+      finalLatex = finalLatex.replace(existingHeaderMatch[0], finalHeaders);
+    } else {
+      finalLatex = finalHeaders + finalLatex;
+    }
   }
+  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, extractLatex(finalLatex));
 
   finalLatex = extractLatex(await finalRefinement(finalLatex));
 
@@ -148,6 +154,62 @@ async function refineProcessedVideo() {
   console.log("Refinement process complete")
 }
 
+
+async function compileRefinedProcessedVideo() {
+  await ensureTempDir();
+  const processedVideos = await getProcessedVideos();
+  const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to refine');
+
+  if (!selectedVideoId) return;
+
+  const video = await getProcessedVideo(selectedVideoId);
+  if (!video) {
+    console.log("video not found");
+    return;
+  }
+
+
+  await compileLatex(video.refined);
+
+
+  console.log("")
+}
+
+
+async function compileLatex(latexDocument) {
+  const tempDir = path.join(__dirname, '..', 'temp');
+  const texFilePath = path.join(tempDir, 'temp.tex');
+
+  try {
+    await fs.writeFile(texFilePath, latexDocument)
+  } catch (err) {
+
+  }
+  const compiler = new LatexCompiler({
+    // latexCommand: 'xelatex', // If you want to use xelatex
+    maxRuns: 4
+  });
+
+  try {
+    const result = await compiler.compile(texFilePath); // Replace with your LaTeX file path
+
+    if (result.success) {
+      console.log('PDF compiled successfully!');
+      console.log('PDF path:', result.pdfPath);
+      return result.pdfPath
+    } else {
+      console.error('PDF compilation failed!');
+      console.error('Errors:', result.errors);
+      return result.errors.map(el => JSON.stringify(el)).join('\n')
+    }
+
+    console.log('Full Log:\n', result.log);
+  } catch (err) {
+    console.error('An error occurred:', err);
+  } finally {
+    await compiler.cleanup();
+  }
+}
 
 
 function escapeRegex(string) {
@@ -269,6 +331,7 @@ async function main() {
           { name: 'Process new videos (transcript)', value: 'process_transcript' },
           { name: 'Process new videos (audio)', value: 'process_audio' },
           { name: 'Refine a processed video', value: 'refine' },
+          { name: 'Compile refined', value: 'compile' },
           { name: 'View processed videos', value: 'view' },
           { name: 'Exit', value: 'exit' },
         ],
@@ -283,6 +346,10 @@ async function main() {
           break;
         case 'refine':
           await refineProcessedVideo();
+          break;
+
+        case 'compile':
+          await compileRefinedProcessedVideo();
           break;
 
         case 'view':
