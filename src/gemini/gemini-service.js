@@ -85,7 +85,7 @@ async function generateLatexFromTranscription(transcription) {
     systemInstruction: SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   });
   const chatSession = model.startChat({
-    generationConfig,
+    generationConfig:{...generationConfig, temperature:0.4},
     history: [],
   });
 
@@ -156,7 +156,7 @@ async function getChatSessionForRefinement(transcription, document) {
     systemInstruction: prompt,
   });
   const chatSession = model.startChat({
-    generationConfig: { ...generationConfig, temperature: 0 },
+    generationConfig: { ...generationConfig, temperature: 0.4 },
     history: [],
   });
 
@@ -276,7 +276,7 @@ async function finalRefinement(document) {
   });
 
   const chatSession = model.startChat({
-    generationConfig,
+    generationConfig:{...generationConfig, temperature:0.5},
     history: [],
   });
 

@@ -89,7 +89,7 @@ async function refineProcessedVideo() {
     return;
   }
 
-  let refinedLatex = extractLatex(video.latex_output);
+  let refinedLatex = extractLatex(video.refined || video.latex_output);
   const sections = splitTranscription(refinedLatex);
   const selectedSections = await selectSections(sections);
 
