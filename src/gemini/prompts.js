@@ -305,7 +305,17 @@ Your task:
 
 Original lesson transcript:
 {original_transcript}
+
+Original document:
+{original_document}
+
+
+
+You will be given the name of the section and for each section you need to output that section alone refined.
+
 `;
+
+export const FINAL_DOCUMENT_MESSAGE = "final refined complete document";
 
 
 

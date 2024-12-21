@@ -2,6 +2,7 @@ const {
   GoogleGenerativeAI,
   HarmCategory,
   HarmBlockThreshold,
+  ChatSession,
 } = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 
@@ -13,7 +14,7 @@ const latex = require('node-latex')
 
 
 const config = require('../utils/config');
-const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT, FINAL_REFINEMENT_PROMPT } = require("./prompts");
+const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT, FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE } = require("./prompts");
 const { LatexCompiler } = require("./latex");
 
 const apiKey = config.geminiApiKey;
@@ -141,23 +142,52 @@ async function generateLatexFromAudio(audioPaths) {
   return responses.join('\n');
 }
 
-
-async function refineSection(originalTranscript, section) {
+async function getChatSessionForRefinement(transcription, document) {
   const prompt = SECTION_REFINEMENT_PROMPT.replace(
     "{original_transcript}",
-    originalTranscript
+    transcription
+  ).replace(
+    "{original_document}",
+    document
   );
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-exp-1206",
+    model: "gemini-2.0-flash-exp",
     systemInstruction: prompt,
   });
   const chatSession = model.startChat({
-    generationConfig,
+    generationConfig:{...generationConfig,temperature:2},
     history: [],
   });
-  const result = await chatSession.sendMessage(`Original section:\n${section}\n\nProvide the refined LaTeX:\n`);
+
+  return chatSession
+
+}
+
+async function changeChatSessionModel(chatSession, newModel='gemini-exp-1206') {
+  const params = chatSession.params;
+  const model = genAI.getGenerativeModel({
+    model:newModel,
+    systemInstruction: params.systemInstruction,
+  });
+  return model.startChat(params);
+}
+
+
+async function refineSection(chatSession, section) {
+  console.log("Refining", section.split("\n")[0], "with", chatSession.model);
+  const result = await chatSession.sendMessage(`${section}`)
   return result.response.text();
+}
+
+async function refineSections(originalTranscript, originalDocument, sections) {
+  const chatSession = await getChatSessionForRefinement(originalTranscript, originalDocument);
+
+  for(let section of sections) {
+    await refineSection(chatSession, section);
+  }
+
+  return await refineSection(await changeChatSessionModel(chatSession, 'gemini-exp-1206'), FINAL_DOCUMENT_MESSAGE);
 }
 
 
@@ -204,7 +234,7 @@ function extractLatex(text) {
   if (startIndex === -1) {
     return text;
   }
-  const endIndex = Math.max(text.indexOf(endDelimiter, startIndex + startDelimiter.length), 0);
+  const endIndex = Math.max(text.lastIndexOf(endDelimiter, startIndex + startDelimiter.length), text.length);
   // if (endIndex === -1) {
   //   return null;
   // }
@@ -238,7 +268,7 @@ async function finalRefinement(document) {
       console.log("Sending message", messageToSend, "to Gemini");
     }
     const result = await chatSession.sendMessage("Document: \n" + fixedDocument + "\nError Log:" + errorLog);
-   fixedDocument = extractLatex(result.response.text());
+    fixedDocument = extractLatex(result.response.text());
     const compilationResult = await compileLatex(fixedDocument);
     errorLog = compilationResult;
     console.log(compilationResult)
@@ -273,4 +303,4 @@ function isErrorString(compilationResult) {
 
 
 
-module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement, extractLatex };
+module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, refineSections, finalRefinement, extractLatex };

@@ -2,8 +2,8 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSection, finalRefinement, extractLatex } = require('./gemini/gemini-service');
-const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB } = require('./db/database');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSection,refineSections, finalRefinement, extractLatex } = require('./gemini/gemini-service');
+const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB, getProcessedVideoByFileId } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./ui');
 const path = require('path');
 const fs = require('fs').promises;
@@ -96,56 +96,15 @@ async function refineProcessedVideo() {
   const sections = splitTranscription(refinedLatex);
   const selectedSections = await selectSections(sections);
 
-  let newHeaders = [];
+  return refineSelectedSections(video, selectedSections);
+ 
+}
 
 
-  for (const { index, section } of selectedSections) {
-    const refinedSection = extractLatex(await refineSection(video.transcription, section));
-    await showSectionPreview(section, refinedSection, index);
+async function refineSelectedSections(video, selectedSections) {
+  let finalLatex = extractLatex(await refineSections(video.transcription,extractLatex(video.latex_output), selectedSections.map(({section}) => section)));
 
-    if (refinedSection) {
-      const headerMatch = refinedSection.match(/\\documentclass.*?\\begin{document}/s);
-      if (headerMatch) {
-        const newHeader = headerMatch[0];
-        newHeaders.push(newHeader);
-      }
-
-
-      const trimmedRefined = refinedSection.replace(/\\documentclass.*?\\begin{document}/s, '').replace(/\\end{document}/, '').trim();
-      const sectionRegex = new RegExp(`\\\\section\\{[^{}]*\\}${escapeRegex(section)}(?=\\\\section\\{|\\\\end{document}|$)`, 's');
-      refinedLatex = refinedLatex.replace(sectionRegex, (match) => {
-        return match.replace(section, trimmedRefined);
-      });
-    }
-  }
-
-
-  let finalHeaders = "";
-  if (newHeaders.length > 0) {
-    const existingHeaderMatch = refinedLatex.match(/\\documentclass.*?\\begin{document}/s);
-    const existingHeader = existingHeaderMatch ? existingHeaderMatch[0] : "";
-    const existingHeaderLines = existingHeader.split('\n').map(line => line.trim());
-
-
-    const uniqueNewHeaderLines = newHeaders.join('\n').split('\n').map(line => line.trim()).filter(line => line !== "").filter(line => !existingHeaderLines.includes(line));
-
-    finalHeaders = uniqueNewHeaderLines.join('\n');
-    if (finalHeaders) {
-      finalHeaders = finalHeaders + "\n";
-    }
-
-  }
-
-  let finalLatex = selectedSections.length ? refinedLatex : (video.refined || refinedLatex);
-  if (finalHeaders) {
-    const existingHeaderMatch = finalLatex.match(/\\documentclass.*?\\begin{document}/s);
-    if (existingHeaderMatch) {
-      finalLatex = finalLatex.replace(existingHeaderMatch[0], finalHeaders);
-    } else {
-      finalLatex = finalHeaders + finalLatex;
-    }
-  }
-  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, extractLatex(finalLatex));
+  await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, finalLatex);
 
   finalLatex = extractLatex(await finalRefinement(finalLatex));
 
@@ -241,8 +200,10 @@ async function processVideos(format = 'audio') {
   const transcriptions = []
   let lastVideo = null
 
+  let videoId;
+
   switch (format) {
-    case 'audio':
+    case 'audio1':
       const audioPaths = []
       for (const video of selectedVideos) {
         console.log(`Processing video: ${video.name}`);
@@ -261,7 +222,27 @@ async function processVideos(format = 'audio') {
       }
       console.log(`Number of audios that wil be used ${audioPaths.length}`)
 
-      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'), '');
+      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'), '');
+      break;
+
+      case 'video':
+      const videoPaths = []
+      for (const video of selectedVideos) {
+        console.log(`Processing video: ${video.name}`);
+        lastVideo = video;
+        const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
+        try {
+          await downloadFile(authClient, video.id, videoPath);
+          videoPaths.push(videoPath);
+          console.log(`Processed video: ${video.name}`);
+
+        } catch (err) {
+          console.error(`Error processing video ${video.name}`, err);
+        }
+      }
+      console.log(`Number of videos that wil be used ${videoPaths.length}`)
+
+      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(videoPaths), transcriptions.join('\n'), '');
       break;
     case 'transcript':
       for (const video of selectedVideos) {
@@ -283,10 +264,20 @@ async function processVideos(format = 'audio') {
       }
 
       console.log(`Number of transcription that wil be used ${transcriptions.length}`)
-      await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
+      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
       break;
     default: throw new Error("format \"" + format + "\" not supported");
   }
+
+  const video = await getProcessedVideoByFileId(lastVideo.id);
+  
+  let refinedLatex = extractLatex(video.latex_output);
+  const sections = splitTranscription(refinedLatex);
+
+  console.log(sections.length);
+  
+
+  return await refineSelectedSections(video, sections.map(section => ({section})))
 }
 
 
