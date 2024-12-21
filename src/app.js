@@ -2,14 +2,11 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSection,refineSections, finalRefinement, extractLatex } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB, getProcessedVideoByFileId } = require('./db/database');
-const { selectVideoFiles, showProcessedVideos, showVideoDetails } = require('./ui');
+const { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate } = require('./ui');
 const path = require('path');
 const fs = require('fs').promises;
-
-const fs2 = require('fs');
-const latex = require('node-latex');
 const { LatexCompiler } = require('./gemini/latex');
 
 
@@ -97,12 +94,12 @@ async function refineProcessedVideo() {
   const selectedSections = await selectSections(sections);
 
   return refineSelectedSections(video, selectedSections);
- 
+
 }
 
 
 async function refineSelectedSections(video, selectedSections) {
-  let finalLatex = extractLatex(await refineSections(video.transcription,extractLatex(video.latex_output), selectedSections.map(({section}) => section)));
+  let finalLatex = extractLatex(await refineSections(video.transcription, extractLatex(video.latex_output), selectedSections.map(({ section }) => section)));
 
   await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, finalLatex);
 
@@ -185,100 +182,116 @@ async function processVideos(format = 'audio') {
   }
 
   const selectedVideos = await selectVideoFiles(videos);
-  selectedVideos.sort((a, b) => {
-    if (a.name < b.name) {
-      return -1;
+  const selectedVideosGroupedByKeys = groupFilesByDate(selectedVideos);
+  const keysSorted = Object.keys(selectedVideosGroupedByKeys).sort();
+
+  for (const key of keysSorted) {
+    const selectedVideos = selectedVideosGroupedByKeys[key];
+    selectedVideos.sort((a, b) => a.name.localeCompare(b.name));
+    console.log(`Number of videos to elaborate: ${selectedVideos.length}`);
+
+    let lastVideo = null;
+    let videoId;
+    const transcriptions = [];
+    try {
+      switch (format) {
+        case 'audio':
+          videoId = await processAudioVideos(authClient, selectedVideos, transcriptions);
+          break;
+        case 'video':
+          videoId = await processVideoVideos(authClient, selectedVideos, transcriptions);
+          break;
+        case 'transcript':
+          videoId = await processTranscriptVideos(authClient, selectedVideos, transcriptions);
+          break;
+        default:
+          throw new Error(`format "${format}" not supported`);
+      }
+
+      const video = await getProcessedVideo(videoId);
+      const refinedLatex = extractLatex(video.latex_output);
+      const sections = splitTranscription(refinedLatex);
+      await refineSelectedSections(video, sections.map(section => ({ section })));
+      await cleanupTemp();
+    } catch (err) {
+      console.error('Error processing videos:', err);
+      continue;
+    } finally {
+      await cleanupTemp();
     }
-    if (a.name > b.name) {
-      return 1;
+  }
+}
+
+async function processAudioVideos(authClient, selectedVideos, transcriptions) {
+  const audioPaths = [];
+  let lastVideo = null;
+
+  for (const video of selectedVideos) {
+    console.log(`Processing video: ${video.name}`);
+    lastVideo = video;
+    const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
+    const audioPath = path.join(tempDir, `${video.id}_audio.wav`);
+
+    try {
+      await downloadFile(authClient, video.id, videoPath);
+      await extractAudio(videoPath, audioPath);
+      audioPaths.push(audioPath);
+      console.log(`Processed video: ${video.name}`);
+    } catch (err) {
+      console.error(`Error processing video ${video.name}`, err);
     }
-    return 0;
-  });
-  console.log(`Number of videos to elaborate: ${selectedVideos.length}`)
-  // const selectedVideos = ['/Users/lucasimonetti/Downloads/Nuova riunione del canale-20241001_164246-Registrazione della riunione.mp4']
-
-  const transcriptions = []
-  let lastVideo = null
-
-  let videoId;
-
-  switch (format) {
-    case 'audio1':
-      const audioPaths = []
-      for (const video of selectedVideos) {
-        console.log(`Processing video: ${video.name}`);
-        lastVideo = video;
-        const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
-        const audioPath = path.join(tempDir, `${video.id}_audio.wav`);
-        try {
-          await downloadFile(authClient, video.id, videoPath);
-          await extractAudio(videoPath, audioPath);
-          audioPaths.push(audioPath);
-          console.log(`Processed video: ${video.name}`);
-
-        } catch (err) {
-          console.error(`Error processing video ${video.name}`, err);
-        }
-      }
-      console.log(`Number of audios that wil be used ${audioPaths.length}`)
-
-      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'), '');
-      break;
-
-      case 'video':
-      const videoPaths = []
-      for (const video of selectedVideos) {
-        console.log(`Processing video: ${video.name}`);
-        lastVideo = video;
-        const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
-        try {
-          await downloadFile(authClient, video.id, videoPath);
-          videoPaths.push(videoPath);
-          console.log(`Processed video: ${video.name}`);
-
-        } catch (err) {
-          console.error(`Error processing video ${video.name}`, err);
-        }
-      }
-      console.log(`Number of videos that wil be used ${videoPaths.length}`)
-
-      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(videoPaths), transcriptions.join('\n'), '');
-      break;
-    case 'transcript':
-      for (const video of selectedVideos) {
-        console.log(`Processing video: ${video.name}`);
-        lastVideo = video;
-        const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
-        const audioPath = path.join(tempDir, `${video.id}_audio.wav`);
-        try {
-          await downloadFile(authClient, video.id, videoPath);
-          await extractAudio(videoPath, audioPath);
-          const transcription = await transcribeAudio(audioPath);
-          transcriptions.push(transcription)
-
-          console.log(`Processed video: ${video.name}`);
-
-        } catch (err) {
-          console.error(`Error processing video ${video.name}`, err);
-        }
-      }
-
-      console.log(`Number of transcription that wil be used ${transcriptions.length}`)
-      videoId = await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
-      break;
-    default: throw new Error("format \"" + format + "\" not supported");
   }
 
-  const video = await getProcessedVideoByFileId(lastVideo.id);
-  
-  let refinedLatex = extractLatex(video.latex_output);
-  const sections = splitTranscription(refinedLatex);
-
-  console.log(sections.length);
-  
-
-  return await refineSelectedSections(video, sections.map(section => ({section})))
+  console.log(`Number of audios that will be used: ${audioPaths.length}`);
+  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(audioPaths), transcriptions.join('\n'), '');
 }
+
+async function processVideoVideos(authClient, selectedVideos, transcriptions) {
+  const videoPaths = [];
+  let lastVideo = null;
+
+  for (const video of selectedVideos) {
+    console.log(`Processing video: ${video.name}`);
+    lastVideo = video;
+    const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
+
+    try {
+      await downloadFile(authClient, video.id, videoPath);
+      videoPaths.push(videoPath);
+      console.log(`Processed video: ${video.name}`);
+    } catch (err) {
+      console.error(`Error processing video ${video.name}`, err);
+    }
+  }
+
+  console.log(`Number of videos that will be used: ${videoPaths.length}`);
+  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(videoPaths), transcriptions.join('\n'), '');
+}
+
+async function processTranscriptVideos(authClient, selectedVideos, transcriptions) {
+  let lastVideo = null;
+
+  for (const video of selectedVideos) {
+    console.log(`Processing video: ${video.name}`);
+    lastVideo = video;
+    const videoPath = path.join(tempDir, `${video.id}_video.mp4`);
+    const audioPath = path.join(tempDir, `${video.id}_audio.wav`);
+
+    try {
+      await downloadFile(authClient, video.id, videoPath);
+      await extractAudio(videoPath, audioPath);
+      const transcription = await transcribeAudio(audioPath);
+      transcriptions.push(transcription);
+      console.log(`Processed video: ${video.name}`);
+    } catch (err) {
+      console.error(`Error processing video ${video.name}`, err);
+    }
+  }
+
+  console.log(`Number of transcriptions that will be used: ${transcriptions.length}`);
+  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
+}
+
 
 
 async function viewProcessedVideos() {

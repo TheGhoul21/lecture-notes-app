@@ -38,7 +38,7 @@ async function uploadToGemini(path, mimeType) {
 
 
 const generationConfig = {
-  temperature: 1,
+  temperature: 0,
   topP: 0.95,
   topK: 40,
   maxOutputTokens: 8192,
@@ -156,7 +156,7 @@ async function getChatSessionForRefinement(transcription, document) {
     systemInstruction: prompt,
   });
   const chatSession = model.startChat({
-    generationConfig:{...generationConfig,temperature:2},
+    generationConfig: { ...generationConfig, temperature: 0 },
     history: [],
   });
 
@@ -164,17 +164,24 @@ async function getChatSessionForRefinement(transcription, document) {
 
 }
 
-async function changeChatSessionModel(chatSession, newModel='gemini-exp-1206') {
+async function changeChatSessionModel(chatSession, newModel = 'gemini-exp-1206') {
   const params = chatSession.params;
   const model = genAI.getGenerativeModel({
-    model:newModel,
+    model: newModel,
     systemInstruction: params.systemInstruction,
   });
   return model.startChat(params);
 }
 
+async function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  })
+}
+
 
 async function refineSection(chatSession, section) {
+  await sleep(1000);
   console.log("Refining", section.split("\n")[0], "with", chatSession.model);
   const result = await chatSession.sendMessage(`${section}`)
   return result.response.text();
@@ -183,11 +190,29 @@ async function refineSection(chatSession, section) {
 async function refineSections(originalTranscript, originalDocument, sections) {
   const chatSession = await getChatSessionForRefinement(originalTranscript, originalDocument);
 
-  for(let section of sections) {
+  for (let section of sections) {
     await refineSection(chatSession, section);
   }
 
-  return await refineSection(await changeChatSessionModel(chatSession, 'gemini-exp-1206'), FINAL_DOCUMENT_MESSAGE);
+  const finalResponse = await refineSection(await /*changeChatSessionModel(chatSession, 'gemini-exp-1206')*/chatSession, FINAL_DOCUMENT_MESSAGE);
+
+  let refinedDocument = extractLatex(finalResponse);
+
+  const MAX_TRIES = 5;
+  let current = 1;
+
+  while (!refinedDocument.includes("\\end{document}")) {
+    const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
+    console.log(continuationResponse);
+    refinedDocument += extractLatex(continuationResponse);
+
+    current++;
+    if (current == MAX_TRIES) {
+      break;
+    }
+  }
+
+  return refinedDocument
 }
 
 
@@ -255,49 +280,28 @@ async function finalRefinement(document) {
     history: [],
   });
 
-  let currentDocument = document;
-  const maxIterations = 100;
-  let previousErrors = new Set();
-  let messageToSend = currentDocument;
+  const result = await chatSession.sendMessage(document)
+  const finalResponse = result.response.text();
 
-  let fixedDocument = extractLatex(currentDocument);
-  let errorLog = await compileLatex(fixedDocument);
+  let refinedDocument = extractLatex(finalResponse);
 
-  for (let i = 0; i < maxIterations; i++) {
-    if (i > 0) {
-      console.log("Sending message", messageToSend, "to Gemini");
-    }
-    const result = await chatSession.sendMessage("Document: \n" + fixedDocument + "\nError Log:" + errorLog);
-    fixedDocument = extractLatex(result.response.text());
-    const compilationResult = await compileLatex(fixedDocument);
-    errorLog = compilationResult;
-    console.log(compilationResult)
+  const MAX_TRIES = 5;
+  let current = 1;
 
-    if (isPdf(compilationResult)) {
-      console.log(`LaTeX document fixed after ${i + 1} iterations`);
-      return fixedDocument;
-    }
-    if (isErrorString(compilationResult)) {
-      const errorString = compilationResult;
-      messageToSend = errorString;
-      previousErrors.add(errorString);
-      currentDocument = fixedDocument;
-    } else {
-      console.log("Unknown error during compilation");
-      return currentDocument;
+  while (!refinedDocument.includes("\\end{document}")) {
+    const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
+    console.log(continuationResponse);
+    refinedDocument += extractLatex(continuationResponse);
+
+    current++;
+    if (current == MAX_TRIES) {
+      break;
     }
   }
-  console.log("Max iterations reached. Aborting");
-  return currentDocument;
+  return refinedDocument;
 }
 
-function isPdf(compilationResult) {
-  return typeof compilationResult === 'string' && compilationResult.endsWith('.pdf');
-}
 
-function isErrorString(compilationResult) {
-  return typeof compilationResult === 'string';
-}
 
 
 

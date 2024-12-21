@@ -320,9 +320,12 @@ export const FINAL_DOCUMENT_MESSAGE = "final refined complete document";
 
 
 export const FINAL_REFINEMENT_PROMPT = (
-    `Please fix the LaTeX errors in the attached document. Additionally, enhance the document's visual presentation by adding boxes, diagrams, and plots where appropriate to improve clarity and understanding
-Add all the missing commands, packages and whatever you feel like is missing from the preamble. At the end verify that plots, diagrams and pictures are readable, don't go over screen and the labels do not overlap.
-Convert mathematical statements (theorems, definitions, examples, remarks, algorithms) to LaTeX tcolorboxes. Use these styles: Theorem (red), Definition (green), Example (purple), Remark (gray), Algorithm (blue). Format: \begin{tcolorbox}[title=<Title>, colback=<Background>, colframe=<Frame>] <Content> \end{tcolorbox}. Preserve content. Use generic titles if none provided.
+    `Please check and eventually fix the errors in the following LaTeX document.
+Convert mathematical statements (theorems, definitions, examples, remarks, algorithms) to LaTeX tcolorboxes. Use these styles: Theorem (red), Definition (green), Example (purple), Remark (gray), Algorithm (blue). Format: \\begin{tcolorbox}[title=<Title>, colback=<Background>, colframe=<Frame>] <Content> \\end{tcolorbox}. Preserve content. Use generic titles if none provided.
 
+
+\`\`\`latex
+....
+\`\`\`
 `);
 

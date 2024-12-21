@@ -21,6 +21,28 @@ async function selectVideoFiles(files) {
     return selected;
 }
 
+function groupFilesByDate(choices) {
+    const groupedFiles = {};
+
+    for (const choice of choices) {
+        // Extract date using regular expression
+        const dateMatch = choice.name.match(/(\d{8})/); // Matches 8 digits (YYYYMMDD)
+
+        if (dateMatch) {
+            const date = dateMatch[1];
+
+            // Group files by date
+            if (!groupedFiles[date]) {
+                groupedFiles[date] = [];
+            }
+            groupedFiles[date].push({...choice, date});
+        }
+    }
+
+    // Convert the groupedFiles object to an array of arrays
+    return groupedFiles;
+}
+
 
 async function showProcessedVideos(videos) {
     return import('chalk').then(async ({default:chalk}) => {
@@ -66,4 +88,4 @@ async function showVideoDetails(video) {
 }
 
 
-module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails };
+module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate };
