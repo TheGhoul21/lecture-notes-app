@@ -212,12 +212,12 @@ async function processVideos(format = 'audio') {
       const refinedLatex = extractLatex(video.latex_output);
       const sections = splitTranscription(refinedLatex);
       await refineSelectedSections(video, sections.map(section => ({ section })));
-      await cleanupTemp();
     } catch (err) {
       console.error('Error processing videos:', err);
       continue;
     } finally {
       await cleanupTemp();
+      await ensureTempDir();
     }
   }
 }
