@@ -12,9 +12,12 @@ const fs2 = require('fs');
 const path = require('path');
 const latex = require('node-latex')
 
-
+const USE_MARKDOWN = false;
 const config = require('../utils/config');
-const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT, FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE } = require("./prompts");
+const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
+  SYSTEM_PROMPT_WITH_TRANSCRIPTIONS_MARKDOWN, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT,
+  FINAL_REFINEMENT_PROMPT_MARKDOWN, SECTION_REFINEMENT_PROMPT_MARKDOWN,
+  FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE } = require("./prompts");
 const { LatexCompiler } = require("./latex");
 
 const apiKey = config.geminiApiKey;
@@ -78,14 +81,14 @@ async function generateTranscriptionFromAudio(audioPath) {
   return await response.response.text();
 }
 
-async function generateLatexFromTranscription(transcription) {
+async function generateLatexFromTranscription(transcription, markdown = USE_MARKDOWN) {
 
   const model = genAI.getGenerativeModel({
     model: "gemini-exp-1206",
-    systemInstruction: SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
+    systemInstruction: markdown ? SYSTEM_PROMPT_WITH_TRANSCRIPTIONS_MARKDOWN : SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   });
   const chatSession = model.startChat({
-    generationConfig:{...generationConfig, temperature:0.4},
+    generationConfig: { ...generationConfig, temperature: 0.4 },
     history: [],
   });
 
@@ -142,8 +145,8 @@ async function generateLatexFromAudio(audioPaths) {
   return responses.join('\n');
 }
 
-async function getChatSessionForRefinement(transcription, document) {
-  const prompt = SECTION_REFINEMENT_PROMPT.replace(
+async function getChatSessionForRefinement(transcription, document, markdown = USE_MARKDOWN) {
+  const prompt = (markdown ? SECTION_REFINEMENT_PROMPT_MARKDOWN : SECTION_REFINEMENT_PROMPT).replace(
     "{original_transcript}",
     transcription
   ).replace(
@@ -187,7 +190,7 @@ async function refineSection(chatSession, section) {
   return result.response.text();
 }
 
-async function refineSections(originalTranscript, originalDocument, sections) {
+async function refineSections(originalTranscript, originalDocument, sections,markdown=USE_MARKDOWN) {
   const chatSession = await getChatSessionForRefinement(originalTranscript, originalDocument);
 
   for (let section of sections) {
@@ -200,15 +203,17 @@ async function refineSections(originalTranscript, originalDocument, sections) {
 
   const MAX_TRIES = 5;
   let current = 1;
+  if (!markdown) {
 
-  while (!refinedDocument.includes("\\end{document}")) {
-    const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
-    console.log(continuationResponse);
-    refinedDocument += extractLatex(continuationResponse);
+    while (!refinedDocument.includes("\\end{document}")) {
+      const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
+      console.log(continuationResponse);
+      refinedDocument += extractLatex(continuationResponse);
 
-    current++;
-    if (current == MAX_TRIES) {
-      break;
+      current++;
+      if (current == MAX_TRIES) {
+        break;
+      }
     }
   }
 
@@ -266,8 +271,22 @@ function extractLatex(text) {
   return text.substring(startIndex + startDelimiter.length, endIndex).trim();
 }
 
-async function finalRefinement(document) {
-  const prompt = FINAL_REFINEMENT_PROMPT;
+function extractMarkdown(text) {
+  const startDelimiter = "```markdown";
+  const endDelimiter = "```";
+  const startIndex = text.indexOf(startDelimiter);
+  if (startIndex === -1) {
+    return text;
+  }
+  const endIndex = Math.max(text.lastIndexOf(endDelimiter, startIndex + startDelimiter.length), text.length);
+  // if (endIndex === -1) {
+  //   return null;
+  // }
+  return text.substring(startIndex + startDelimiter.length, endIndex).trim();
+}
+
+async function finalRefinement(document, markdown = USE_MARKDOWN) {
+  const prompt = markdown ? FINAL_REFINEMENT_PROMPT_MARKDOWN : FINAL_REFINEMENT_PROMPT;
   console.log("Final refinement");
 
   const model = genAI.getGenerativeModel({
@@ -276,7 +295,7 @@ async function finalRefinement(document) {
   });
 
   const chatSession = model.startChat({
-    generationConfig:{...generationConfig, temperature:0.5},
+    generationConfig: { ...generationConfig, temperature: 0.5 },
     history: [],
   });
 
@@ -288,17 +307,60 @@ async function finalRefinement(document) {
   const MAX_TRIES = 5;
   let current = 1;
 
-  while (!refinedDocument.includes("\\end{document}")) {
-    const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
-    console.log(continuationResponse);
-    refinedDocument += extractLatex(continuationResponse);
+  if (!markdown) {
+    while (!refinedDocument.includes("\\end{document}")) {
+      const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
+      console.log(continuationResponse);
+      refinedDocument += extractLatex(continuationResponse);
 
-    current++;
-    if (current == MAX_TRIES) {
-      break;
+      current++;
+      if (current == MAX_TRIES) {
+        break;
+      }
     }
   }
   return refinedDocument;
+}
+
+async function convertLatexToMarkdown(latexDocument) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: "You are an expert in converting latex documents to markdown. When the conversion is complete you write OK. Create a table of contents for each document and place it right under the title",
+  });
+
+  const generationConfig = {
+    temperature: 0,
+    topP: 0.95,
+    // topK: 64,
+    maxOutputTokens: 8192,
+    responseMimeType: "text/plain",
+  };
+
+
+  const chatSession = model.startChat({
+    generationConfig,
+    history: [
+
+    ],
+  });
+
+  const result = await chatSession.sendMessage(latexDocument);
+
+  let markdown = extractMarkdown(result.response.text());
+
+  while (!markdown.endsWith('OK')) {
+
+    const result = await chatSession.sendMessage("if it's complete write OK otherwise continue exactly from where you stopped");
+    markdown += extractMarkdown(result.response.text());
+  }
+
+
+  return markdown.replace(/```\s+OK\s*$/, '');
+
+
 }
 
 
@@ -307,4 +369,4 @@ async function finalRefinement(document) {
 
 
 
-module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, refineSections, finalRefinement, extractLatex };
+module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, refineSections, finalRefinement, extractLatex, extractMarkdown, convertLatexToMarkdown };
