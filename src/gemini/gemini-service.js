@@ -349,16 +349,18 @@ async function convertLatexToMarkdown(latexDocument) {
 
   const result = await chatSession.sendMessage(latexDocument);
 
-  let markdown = extractMarkdown(result.response.text());
+  let text = result.response.text().trim();
+  let markdown = extractMarkdown(text);
 
-  while (!markdown.endsWith('OK')) {
+  while (!text.endsWith('OK')) {
 
     const result = await chatSession.sendMessage("if it's complete write OK otherwise continue exactly from where you stopped");
-    markdown += extractMarkdown(result.response.text());
+    text = result.response.text().trim();
+    markdown += extractMarkdown(text);
   }
 
 
-  return markdown.replace(/```\s+OK\s*$/, '');
+  return extractMarkdown(markdown).replace(/```\s+OK\s*$/, '').replace(/\s+OK\s*$/, '');
 
 
 }
