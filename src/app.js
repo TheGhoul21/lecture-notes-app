@@ -4,7 +4,7 @@ const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
 const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex, convertLatexToMarkdown } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB, getProcessedVideoByFileId } = require('./db/database');
-const { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate } = require('./ui');
+const { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, ...ui } = require('./ui');
 const path = require('path');
 const fs = require('fs').promises;
 const { LatexCompiler } = require('./gemini/latex');
@@ -341,6 +341,14 @@ async function showSectionPreview(originalSection, refinedSection, index) {
   });
 }
 
+async function chatWithLesson() {
+  const processedVideos = await getProcessedVideos();
+  const selectedVideoId = await showProcessedVideos(processedVideos);
+
+    const selectedVideo = await getProcessedVideo(selectedVideoId);
+    await ui.chatWithLesson(selectedVideo);
+}
+
 
 async function main() {
   try {
@@ -358,6 +366,7 @@ async function main() {
           { name: 'Refine a processed video', value: 'refine' },
           { name: 'Convert to markdown a processed video', value: 'markdown' },
           { name: 'Compile refined', value: 'compile' },
+          { name: 'Chat with a lesson', value: 'chat' },
           { name: 'View processed videos', value: 'view' },
           { name: 'Exit', value: 'exit' },
         ],
@@ -372,6 +381,9 @@ async function main() {
           break;
         case 'refine':
           await refineProcessedVideo();
+          break;
+        case 'chat':
+          await chatWithLesson();
           break;
         case 'markdown':
           await convertVideToMarkdown();

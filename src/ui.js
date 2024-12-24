@@ -70,6 +70,32 @@ async function showProcessedVideos(videos) {
     });
 }
 
+async function chatWithLesson(video) {
+    return import('chalk').then(async ({default:chalk}) => {
+        const { startChatSessionWithLesson, chatWithTranscription } = require('./gemini/gemini-service');
+
+        const chatSession = await startChatSessionWithLesson(video.transcription);
+        const response = await chatWithTranscription(chatSession, "/help");
+            console.log(chalk.blue('AI Response:'), response);
+
+        while (true) {
+            const { message } = await inquirer.default.prompt({
+                type: 'input',
+                name: 'message',
+                message: 'You:'
+            });
+
+            if (message.toUpperCase() === 'QUIT') {
+                console.log(chalk.red('Exiting chat session.'));
+                break;
+            }
+
+            const response = await chatWithTranscription(chatSession, message);
+            console.log(chalk.blue('AI Response:'), response);
+        }
+    });
+}
+
 
 async function showVideoDetails(video) {
     return import('chalk').then(async ({default:chalk}) => {
@@ -88,4 +114,4 @@ async function showVideoDetails(video) {
 }
 
 
-module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate };
+module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, chatWithLesson };

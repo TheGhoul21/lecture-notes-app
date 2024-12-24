@@ -17,7 +17,8 @@ const config = require('../utils/config');
 const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   SYSTEM_PROMPT_WITH_TRANSCRIPTIONS_MARKDOWN, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT,
   FINAL_REFINEMENT_PROMPT_MARKDOWN, SECTION_REFINEMENT_PROMPT_MARKDOWN,
-  FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE } = require("./prompts");
+  FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE, 
+  CHAT_WITH_TEACHER_PROMPT} = require("./prompts");
 const { LatexCompiler } = require("./latex");
 
 const apiKey = config.geminiApiKey;
@@ -365,10 +366,36 @@ async function convertLatexToMarkdown(latexDocument) {
 
 }
 
+async function startChatSessionWithLesson(transcription) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: CHAT_WITH_TEACHER_PROMPT,
+  });
 
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.4 },
+    history: [],
+  });
 
+  await chatSession.sendMessage(transcription);
+  return chatSession;
+}
 
+async function chatWithTranscription(chatSession, message) {
+  const result = await chatSession.sendMessage(message);
+  return result.response.text();
+}
 
-
-
-module.exports = { generateTranscriptionFromAudio, generateLatexFromTranscription, generateLatexFromAudio, refineSection, refineSections, finalRefinement, extractLatex, extractMarkdown, convertLatexToMarkdown };
+module.exports = {
+  generateTranscriptionFromAudio,
+  generateLatexFromTranscription,
+  generateLatexFromAudio,
+  refineSection,
+  refineSections,
+  finalRefinement,
+  extractLatex,
+  extractMarkdown,
+  convertLatexToMarkdown,
+  startChatSessionWithLesson,
+  chatWithTranscription
+};
