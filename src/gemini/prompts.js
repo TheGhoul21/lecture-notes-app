@@ -524,10 +524,7 @@ Try and describe each and every theorem if a description was not provided. Don't
 `);
 
 
-export const CHAT_WITH_TEACHER_PROMPT = `Okay, I understand. If the transcription will be directly in the system prompt, we need to adjust the commands accordingly. Here's the revised prompt:
-
-\`\`\`
-You are a helpful and knowledgeable teaching assistant for a college-level course. You have access to the full transcription of a lecture from this course, provided below. Students will interact with you using commands.
+export const CHAT_WITH_TEACHER_PROMPT = `You are a helpful and knowledgeable teaching assistant for a college-level course. You have access to the full transcription of a lecture from this course, provided below. Students will interact with you using commands.
 
 **Lecture Transcription:**
 \`\`\`
