@@ -2,23 +2,39 @@ const inquirer = require('inquirer');
 // const chalk = require('chalk');
 
 async function selectVideoFiles(files) {
-    const choices = files.map((file, index) => ({
-        name: `${file.name}`,
-        value: index,
+    const groupedFiles = files.reduce((acc, file) => {
+        const date = extractDateFromFileName(file.name);
+        if (!acc[date]) {
+            acc[date] = [];
+        }
+
+        const formattedDate = new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString();
+        acc[date].push({...file, date:formattedDate});
+        return acc;
+    }, {});
+
+    const choices = Object.keys(groupedFiles).sort().map((date, index) => ({
+        
+        name: `L${String(index + 1).padStart(2, '0')} - ${new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString()}`,
+        value: date,
     }));
 
-    const { selectedFiles } = await inquirer.default.prompt([
+    const { selectedDates } = await inquirer.default.prompt([
         {
             type: 'checkbox',
-            message: 'Select videos to process (order is important)',
-            name: 'selectedFiles',
+            message: 'Select a date to process videos',
+            name: 'selectedDates',
             choices,
             pageSize: 10,
         },
     ]);
 
-    const selected = selectedFiles.map((index) => files[index]);
-    return selected;
+
+    const sortedFiles = selectedDates.map(date => 
+        groupedFiles[date].sort((a, b) => a.name.localeCompare(b.name))
+    );
+
+    return sortedFiles;
 }
 
 function groupFilesByDate(choices) {
@@ -43,6 +59,13 @@ function groupFilesByDate(choices) {
     return groupedFiles;
 }
 
+function extractDateFromFileName(fileName) {
+    const dateMatch = fileName.match(/(\d{8})/); // Matches 8 digits (YYYYMMDD)
+    return dateMatch ? dateMatch[1] : null;
+}
+
+
+
 
 async function showProcessedVideos(videos) {
     return import('chalk').then(async ({default:chalk}) => {
@@ -55,8 +78,17 @@ async function showProcessedVideos(videos) {
         console.log(chalk.green('\nProcessed Videos:'));
         const choices = videos.map(video => ({
             name: `${video.file_name} (ID: ${video.id})`,
-            value: video.id
+            value: video.id,
+            date: extractDateFromFileName(video.file_name)
         }));
+
+        // Sort choices by date in ascending order
+        choices.sort((a, b) => a.date.localeCompare(b.date));
+
+        // Update the name to be Lxx (L01, L02, etc) based on the ascending order
+        choices.forEach((choice, index) => {
+            choice.name = `L${String(index + 1).padStart(2, '0')} - ${choice.name}`;
+        });
 
 
         const { selectedVideoId } = await inquirer.default.prompt({

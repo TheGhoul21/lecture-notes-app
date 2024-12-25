@@ -201,29 +201,26 @@ async function processVideos(format = 'audio') {
     console.log("No videos found in the specified folder");
     return;
   }
-
   const selectedVideos = await selectVideoFiles(videos);
-  const selectedVideosGroupedByKeys = groupFilesByDate(selectedVideos);
-  const keysSorted = Object.keys(selectedVideosGroupedByKeys).sort();
 
-  for (const key of keysSorted) {
-    const selectedVideos = selectedVideosGroupedByKeys[key];
-    selectedVideos.sort((a, b) => a.name.localeCompare(b.name));
-    console.log(`Number of videos to elaborate: ${selectedVideos.length}`);
 
+  for (const selectedGroup of selectedVideos) {
+    const date = selectedGroup[0].date
+    console.log(`Processing videos for date: ${date}`);
+    console.log(`Number of videos to elaborate: ${selectedGroup.length}`);
     let lastVideo = null;
     let videoId;
     const transcriptions = [];
     try {
       switch (format) {
         case 'audio':
-          videoId = await processAudioVideos(authClient, selectedVideos, transcriptions);
+          videoId = await processAudioVideos(authClient, selectedGroup, transcriptions);
           break;
         case 'video':
-          videoId = await processVideoVideos(authClient, selectedVideos, transcriptions);
+          videoId = await processVideoVideos(authClient, selectedGroup, transcriptions);
           break;
         case 'transcript':
-          videoId = await processTranscriptVideos(authClient, selectedVideos, transcriptions);
+          videoId = await processTranscriptVideos(authClient, selectedGroup, transcriptions);
           break;
         default:
           throw new Error(`format "${format}" not supported`);
@@ -241,6 +238,45 @@ async function processVideos(format = 'audio') {
       await ensureTempDir();
     }
   }
+  // const selectedVideos = await selectVideoFiles(videos);
+  // const selectedVideosGroupedByKeys = groupFilesByDate(selectedVideos);
+  // const keysSorted = Object.keys(selectedVideosGroupedByKeys).sort();
+
+  // for (const key of keysSorted) {
+  //   const selectedVideos = selectedVideosGroupedByKeys[key];
+  //   selectedVideos.sort((a, b) => a.name.localeCompare(b.name));
+  //   console.log(`Number of videos to elaborate: ${selectedVideos.length}`);
+
+  //   let lastVideo = null;
+  //   let videoId;
+  //   const transcriptions = [];
+  //   try {
+  //     switch (format) {
+  //       case 'audio':
+  //         videoId = await processAudioVideos(authClient, selectedVideos, transcriptions);
+  //         break;
+  //       case 'video':
+  //         videoId = await processVideoVideos(authClient, selectedVideos, transcriptions);
+  //         break;
+  //       case 'transcript':
+  //         videoId = await processTranscriptVideos(authClient, selectedVideos, transcriptions);
+  //         break;
+  //       default:
+  //         throw new Error(`format "${format}" not supported`);
+  //     }
+
+  //     const video = await getProcessedVideo(videoId);
+  //     const refinedLatex = extractLatex(video.latex_output);
+  //     const sections = splitTranscription(refinedLatex);
+  //     await refineSelectedSections(video, sections.map(section => ({ section })));
+  //   } catch (err) {
+  //     console.error('Error processing videos:', err);
+  //     continue;
+  //   } finally {
+  //     await cleanupTemp();
+  //     await ensureTempDir();
+  //   }
+  // }
 }
 
 async function processAudioVideos(authClient, selectedVideos, transcriptions) {
