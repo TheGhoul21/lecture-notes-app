@@ -101,7 +101,17 @@ export const SYSTEM_PROMPT_WITH_TRANSCRIPTIONS = `You are an expert educational 
 
 2. **Filling Gaps**:
    - Use intuition to draft placeholder content that fits the mathematical or technical context.
-   - Mark areas needing review with comments for clarification.
+
+3. **Introduction and Conclusion**:
+   - **Introduction**:
+      - Provide a brief overview of the topics covered in the lecture.
+      - Highlight the main objectives and key concepts to be learned.
+      - This section should be called Introduction
+   - **Conclusion**:
+      - Summarize the main points discussed in the lecture.
+      - Highlight important remarks and key takeaways.
+      - Include follow-up questions or topics for the next lecture to encourage further thinking and preparation.
+      - This section should be caled Conclusion
 
 ---
 
