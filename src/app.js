@@ -1,8 +1,8 @@
 const { authorize } = require('./auth/google-auth');
-const { listVideoFiles, downloadFile } = require('./drive/drive-utils');
+const { listVideoFiles, downloadFile, listPDFFiles } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex, convertLatexToMarkdown } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex, convertLatexToMarkdown, generateScaffoldFromTranscription,processPdfWithGemini, uploadFileAndGetDetails,...geminiService } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB, getProcessedVideoByFileId } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, ...ui } = require('./ui');
 const path = require('path');
@@ -97,6 +97,89 @@ async function refineProcessedVideo() {
 
 }
 
+
+async function exportRefinedDocuments() {
+  const { exportDir } = await require('inquirer').default.prompt({
+    type: 'input',
+    name: 'exportDir',
+    message: 'Enter the directory to export refined documents:',
+    validate: input => input.trim() !== '' || 'Directory path cannot be empty',
+  });
+  const os = require('node:os');
+
+  // Handle relative paths and symbols like ~
+  const resolvedExportDir = path.resolve(exportDir.replace(/^~(?=$|\/|\\)/, os.homedir()));
+
+  try {
+    await fs.mkdir(resolvedExportDir, { recursive: true });
+    const processedVideos = await getProcessedVideos();
+
+    for (const video of processedVideos) {
+      if (video.refined) {
+        const filePath = path.join(resolvedExportDir, `${video.file_name.replace(/\s+/g, '_')}.tex`);
+        await fs.writeFile(filePath, video.refined);
+        console.log(`Exported: ${filePath}`);
+      }
+    }
+
+    console.log('All refined documents have been exported successfully.');
+  } catch (err) {
+    console.error('Error exporting refined documents:', err);
+  }
+}
+
+async function generateReviewMaterials() {
+  await ensureTempDir();
+  const processedVideos = await getProcessedVideos();
+  const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to generate review materials');
+
+  if (!selectedVideoId) return;
+
+  const video = await getProcessedVideo(selectedVideoId);
+  if (!video) {
+    console.log("video not found");
+    return;
+  }
+
+  const transcription = video.transcription;
+  if (!transcription) {
+    console.log("No transcription available for the selected video.");
+    return;
+  }
+
+  const reviewGuide = await generateReviewGuide(transcription);
+  const flashcards = await generateFlashcards(transcription);
+  const questions = await generateQuestions(transcription);
+
+  const reviewMaterials = {
+    reviewGuide,
+    flashcards,
+    questions,
+  };
+
+  const reviewMaterialsPath = path.join(tempDir, `${video.file_name.replace(/\s+/g, '_')}_review_materials.json`);
+  await fs.writeFile(reviewMaterialsPath, JSON.stringify(reviewMaterials, null, 2));
+  console.log(`Review materials generated and saved to: ${reviewMaterialsPath}`);
+}
+
+async function generateReviewGuide(transcription) {
+  // Implement logic to generate a review guide from the transcription
+  return await geminiService.generateReviewGuide(transcription)
+}
+
+async function generateFlashcards(transcription) {
+  // Implement logic to generate flashcards from the transcription
+  return;
+}
+
+async function generateQuestions(transcription) {
+  // Implement logic to generate questions from the transcription
+  return [`Question 1 for transcription: ${transcription.substring(0, 50)}...`];
+}
+
+
+
+
 async function convertVideToMarkdown() {
   await ensureTempDir();
   const processedVideos = await getProcessedVideos();
@@ -119,8 +202,8 @@ async function convertVideToMarkdown() {
 }
 
 
-async function refineSelectedSections(video, selectedSections) {
-  let finalLatex = extractLatex(await refineSections(video.transcription, extractLatex(video.latex_output), selectedSections.map(({ section }) => section)));
+async function refineSelectedSections(video, selectedSections, additionalFiles=[]) {
+  let finalLatex = extractLatex(await refineSections(video.transcription, extractLatex(video.latex_output), selectedSections.map(({ section }) => section),false,additionalFiles));
 
   await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, finalLatex);
 
@@ -192,6 +275,69 @@ async function compileLatex(latexDocument) {
 function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+
+async function processPdfs() {
+  await ensureTempDir();
+  const authClient = await authorize();
+  const pdfFiles = await listPDFFiles(authClient);
+
+  if (!pdfFiles || pdfFiles.length === 0) {
+    console.log("No PDF files found in the specified folder");
+    return;
+  }
+
+  const selectedPdfs = await selectVideoFiles(pdfFiles);
+
+  for (const selectedGroup of selectedPdfs) {
+    const date = selectedGroup[0].date;
+    console.log(`Processing PDFs for date: ${date}`);
+    console.log(`Number of PDFs to elaborate: ${selectedGroup.length}`);
+    let lastPdf = null;
+    const transcriptions = [];
+    const additionalFiles = [];
+    try {
+      for (const pdf of selectedGroup) {
+        console.log(`Processing PDF: ${pdf.name}`);
+        lastPdf = pdf;
+        const pdfPath = path.join(tempDir, `${pdf.id}.pdf`);
+        try {
+          await downloadFile(authClient, pdf.id, pdfPath);
+          additionalFiles.push(await uploadFileAndGetDetails(pdfPath, 'application/pdf'))
+          const transcription = await processPdfWithGemini(pdfPath);
+
+          transcriptions.push(transcription);
+          console.log(`Processed PDF: ${pdf.name}`);
+        } catch (err) {
+          console.error(`Error processing PDF ${pdf.name}`, err);
+        }
+      }
+
+
+      console.log(`Number of transcriptions that will be used: ${transcriptions.length}`);
+      const wholeTranscription = transcriptions.join('\n');
+      const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
+      console.log(wholeTranscription, scaffold)
+      const latexOutput = await generateLatexFromTranscription(wholeTranscription, scaffold, false, additionalFiles);
+      console.log({latexOutput});
+      await addProcessedVideo(lastPdf.id, lastPdf.name, latexOutput, wholeTranscription, '');
+
+      const refinedLatex = extractLatex(latexOutput);
+      const sections = splitTranscription(refinedLatex);
+      const video = await getProcessedVideoByFileId(lastPdf.id);
+      await refineSelectedSections(video, sections.map(section => ({ section })),additionalFiles);
+    } catch (err) {
+      console.error('Error processing PDFs:', err);
+      continue;
+    } finally {
+      await cleanupTemp();
+      await ensureTempDir();
+    }
+  }
+}
+
+
+
 async function processVideos(format = 'audio') {
   await ensureTempDir();
   const authClient = await authorize();
@@ -322,7 +468,7 @@ async function processVideoVideos(authClient, selectedVideos, transcriptions) {
   }
 
   console.log(`Number of videos that will be used: ${videoPaths.length}`);
-  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(videoPaths), transcriptions.join('\n'), '');
+  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromAudio(videoPaths, 'video/mp4'), transcriptions.join('\n'), '');
 }
 
 async function processTranscriptVideos(authClient, selectedVideos, transcriptions) {
@@ -346,7 +492,67 @@ async function processTranscriptVideos(authClient, selectedVideos, transcription
   }
 
   console.log(`Number of transcriptions that will be used: ${transcriptions.length}`);
-  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(transcriptions.join('\n')), transcriptions.join('\n'), '');
+  const wholeTranscription = transcriptions.join('\n')
+  console.log(`Generating scaffold`)
+  const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
+  console.log(`Generating document`)
+  return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(wholeTranscription, scaffold), transcriptions.join('\n'), '');
+}
+
+async function manualInsert() {
+  const { fileName, transcription, additionalFields } = await require('inquirer').default.prompt([
+    {
+      type: 'input',
+      name: 'fileName',
+      message: 'Enter the filename:',
+      validate: input => input.trim() !== '' || 'Filename cannot be empty',
+    },
+    {
+      type: 'input',
+      name: 'transcription',
+      message: 'Enter the transcription:',
+      validate: input => input.trim() !== '' || 'Transcription cannot be empty',
+    },
+    {
+      type: 'input',
+      name: 'additionalFields',
+      message: 'Enter any additional fields (optional):',
+    },
+  ]);
+
+  const latexOutput = await generateLatexFromTranscription(transcription);
+  await addProcessedVideo(null, fileName, latexOutput, transcription, '', additionalFields);
+
+  console.log('Manual insert completed and processed.');
+}
+
+async function addAllDocumentsToVectorStore() {
+  const processedVideos = await getProcessedVideos();
+
+  for (const video of processedVideos) {
+    console.log("processing transcription")
+    const transcription = video.transcription;
+    if (transcription) {
+      await splitAndCreateEmbeddings(transcription, { file_name: video.file_name });
+    }
+  }
+}
+
+
+async function processPdf(pdfPath) {
+
+  const wholeTranscription = await processPdfWithGemini(pdfPath);
+
+
+
+
+  const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
+  console.log(`Generating document`)
+  await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(wholeTranscription, scaffold), wholeTranscription, '');
+
+  refin
+
+
 }
 
 
@@ -381,8 +587,19 @@ async function chatWithLesson() {
   const processedVideos = await getProcessedVideos();
   const selectedVideoId = await showProcessedVideos(processedVideos);
 
-    const selectedVideo = await getProcessedVideo(selectedVideoId);
-    await ui.chatWithLesson(selectedVideo);
+  const selectedVideo = await getProcessedVideo(selectedVideoId);
+  await ui.chatWithLesson(selectedVideo);
+}
+
+async function chatWithCourse() {
+
+  console.log("doesDBExist", await doesDBExist())
+  if (!await doesDBExist()) {
+    await addAllDocumentsToVectorStore();
+  }
+
+
+  await ui.chatWithCourse();
 }
 
 
@@ -398,12 +615,17 @@ async function main() {
         message: 'What would you like to do?',
         choices: [
           { name: 'Process new videos (transcript)', value: 'process_transcript' },
+          { name: 'Process PDF files', value: 'process_pdf' },
           { name: 'Process new videos (audio)', value: 'process_audio' },
+          { name: 'Process new videos (video)', value: 'process_video' },
           { name: 'Refine a processed video', value: 'refine' },
           { name: 'Convert to markdown a processed video', value: 'markdown' },
           { name: 'Compile refined', value: 'compile' },
+          { name: 'Export all', value: 'export-all' },
           { name: 'Chat with a lesson', value: 'chat' },
+          { name: 'Chat with the course', value: 'chat-course' },
           { name: 'View processed videos', value: 'view' },
+          { name: 'Manual insert', value: 'manual' },
           { name: 'Exit', value: 'exit' },
         ],
       });
@@ -412,15 +634,30 @@ async function main() {
         case 'process_transcript':
           await processVideos('transcript');
           break;
+        case 'process_pdf':
+          await processPdfs();
+          break;
         case 'process_audio':
           await processVideos('audio');
+          break;
+        case 'process_video':
+          await processVideos('video');
           break;
         case 'refine':
           await refineProcessedVideo();
           break;
+        case 'export-all':
+          await exportRefinedDocuments();
+          break;
+        case 'manual':
+          await manualInsert();
+          break;
         case 'chat':
           await chatWithLesson();
           break;
+        // case 'chat-course':
+        //   await chatWithCourse();
+        //   break;
         case 'markdown':
           await convertVideToMarkdown();
           break;

@@ -24,7 +24,7 @@ export const SYSTEM_PROMPT_WITH_TRANSCRIPTIONS = `You are an expert educational 
    - Include essential packages for mathematical content:
      - \`amsmath\`, \`amsthm\`, \`amssymb\` for mathematical symbols.
      - \`thmtools\` for theorem environments.
-     - \`algorithmic\` for algorithms.
+     - \`algpseudocode\` for algorithms.
      - \`tikz\` for diagrams.
      - \`hyperref\` for cross-references.
 
@@ -129,6 +129,7 @@ export const SYSTEM_PROMPT_WITH_TRANSCRIPTIONS = `You are an expert educational 
 \\usepackage{cleveref}
 \\usepackage[most]{tcolorbox}
 \\usepackage{mdframed}
+\\usepackage{tikz}
 \\usetikzlibrary{positioning}
 \\usetikzlibrary{shapes.geometric} % For custom node shapes
 
@@ -306,7 +307,7 @@ export const SYSTEM_PROMPT_WITH_AUDIO = `You are an expert educational assistant
 
 1.  **Document Class and Packages:**
     *   \`article\` or \`report\` class as appropriate.
-    *   Essential packages: \`amsmath\`, \`amsthm\`, \`amssymb\`, \`thmtools\`, \`algorithm2e\` (improved algorithmic), \`tikz\`, \`hyperref\`, \`cleveref\` (for intelligent cross-referencing), \`geometry\` (for page layout), \`enumitem\` (for customized lists).
+    *   Essential packages: \`amsmath\`, \`amsthm\`, \`amssymb\`, \`thmtools\`, \`algorithm2e\` (improved algpseudocode), \`tikz\`, \`hyperref\`, \`cleveref\` (for intelligent cross-referencing), \`geometry\` (for page layout), \`enumitem\` (for customized lists).
 
 2.  **Document Organization:**
     *   Title, author, date.
@@ -382,6 +383,7 @@ export const SYSTEM_PROMPT_WITH_AUDIO = `You are an expert educational assistant
 \\geometry{margin=1in} % Adjust margins as needed
 \\usepackage[most]{tcolorbox}
 \\usepackage{mdframed}
+\\usepackage{tikz}
 \\usetikzlibrary{positioning}
 \\usetikzlibrary{shapes.geometric} % For custom node shapes
 
@@ -449,21 +451,22 @@ Consider the function <span class="math-inline">f\\(x\\) \\= x^2</span>. At the 
 
 export const SECTION_REFINEMENT_PROMPT = `
 You are a LaTeX expert tasked with improving academic documents. You will be given:
-1. A LaTeX section needing refinement
-2. The full lesson/lecture transcript
+1. A LaTeX section needing refinement.
+2. The full lesson/lecture transcript.
 
 Your task:
 - Refine structure, improve mathematical clarity, and enhance algorithms using proper environments (e.g., \\begin{algorithm}, \\State).
 - Convert informal pseudocode into structured algorithms, include complexity analysis, and add line numbers where needed.
 - Turn text descriptions into TikZ diagrams, ensuring proper scaling, node placement, and labeling.
 - Use pgfplots for graphs with proper labels, legends, and scaling.
-- Box important content using tcolorbox or mdframed with appropriate emphasis and spacing.
-- Implement cross-referencing with \\label, \\ref, and \\hyperref.
+- Box important content using tcolorbox (always using the \`breakable\` option) or mdframed with appropriate emphasis and spacing. **Remember to enclose the title of tcolorboxes in curly brackets {} if they contain special characters like commas, semicolons, etc.**
+- Implement cross-referencing with \label, \ref, and \hyperref.
 - Use the full transcript to ensure all relevant information is included and described clearly in the document. Add any missing details, expand on ambiguous points, and clarify unclear statements from the transcript.
 - Ensure consistent styling, clarity, and use of standard packages (algorithm, tikz, pgfplots, tcolorbox, mdframed).
-- Make sure that everyhing in the section is correct, otherwise fix it
-- Always use breakable for the tcolorbox
-- Reduce the yapping to a minimum
+- Make sure that everything in the section is correct; otherwise, fix it.
+- **Crucially, if you determine that a given section covers multiple distinct topics or concepts that would benefit from being treated as separate sections, split the original section into appropriate sections with clear titles and logical flow. Maintain consistent numbering and cross-referencing across the newly created sections. Ensure the new section titles accurately reflect the content from the transcript. Only do this if the content genuinely warrants separate sections, not simply to add more sections.**
+- Minimize extraneous text; be concise and focused.
+- NEVER FOR ANY REASON WHATSOEVER ADD new commands. YOU ALWAYS USE THE EXPLICIT VERSION. NEVER. UNDERSTOOD? NEVER.
 
 Original lesson transcript:
 {original_transcript}
@@ -471,9 +474,7 @@ Original lesson transcript:
 Original document:
 {original_document}
 
-
-
-You will be given the name of the section and for each section you need to output that section alone refined.
+You will be given the name of the section. For each section, you need to output *only that section* refined. If you split the section into subsections, output all the generated subsections.
 
 `;
 
@@ -485,6 +486,7 @@ export const FINAL_REFINEMENT_PROMPT = (
     `Please check and eventually fix the errors in the following LaTeX document.
 Convert only mathematical statements (theorems, definitions, examples, remarks, algorithms) to LaTeX tcolorboxes. Use these styles: Theorem (red), Definition (green), Example (purple), Remark (gray), Algorithm (blue). Format: \\begin{tcolorbox}[title=<Title>, colback=<Background>, colframe=<Frame>] <Content> \\end{tcolorbox}. Preserve content.
 Try and describe each and every theorem if a description was not provided. Don't abuse with tcolorboxes, as they are not good for readability
+Add missing tikz packages or anything to the prelude of the document.
 
 \`\`\`latex
 ....
@@ -586,3 +588,77 @@ Explain the concept of [Specific Concept from the Transcription].
 Okay, the lecture discusses [Specific Concept]. Professor [Lecturer's Name] states, "[Quote the relevant sentence(s) from the transcription defining the concept]".
 \`\`\`
 `;
+
+
+export const CHAT_WITH_COURSE_PROMPT = `You are an expert educational assistant. Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+Context:
+{context}
+`;
+
+
+export const HANDWRITTEN_NOTES_TO_TRANSCRIPT = `Please convert these handwritten notes and book screenshots into a natural lecture transcription that sounds like a professor speaking in class. The output should:
+
+1. Transform visual elements into spoken explanations:
+- Convert handwritten mathematical formulas into natural verbal explanations
+- Describe any diagrams or figures as if being drawn/shown in real-time
+- Transform bullet points and annotations into flowing speech
+
+2. Include authentic teaching elements:
+- Add natural transitions between topics ("Now, let's look at...")
+- Include moments where the professor works through concepts ("Let me show you...")
+- Add verbal pointing ("Here, in this diagram..." or "Look at this part...")
+- Include real-time problem-solving language ("Let's work this out...")
+
+3. Maintain authentic speech patterns:
+- Include natural pauses and thinking moments
+- Add self-corrections and clarifications
+- Insert rhetorical questions to check understanding
+- Include informal asides and real-world examples
+
+4. Keep the technical precision while making it conversational:
+- Preserve all mathematical concepts and terminology
+- Maintain references to textbooks and sources
+- Include impromptu explanations of complex ideas
+- Add verbal emphasis on key points
+
+The transcription should flow as if the professor is actively teaching from these notes and book excerpts, explaining concepts in real-time while referencing visual materials.
+
+Output example:
+So, we were talking about the reinforcement learning. So, the new concept, the new ingredient is this. Is this reinforcement learning, which is a way to interact with the system in order to build a strategy. A strategy meaning a way to avoid the use of some supervised, some collection of information that can in general be used in in supervised learning. So this is the first non supervised learning. Is a sort of intermediate way between unsupervised, completely unsupervised and supervised. We've been discussing briefly what are the ingredients for the for this kind of of 
+`
+
+export const FILL_IN_GAPS_IN_TRANSCRIPT = `I have a partial lecture transcription and the original source material (PDF with handwritten notes and book screenshots). The transcription has some gaps due to audio issues during recording. Please:
+
+1. Compare the transcription with the source material to:
+- Fill in any missing technical content
+- Bridge gaps between concepts
+- Complete any cut-off explanations
+- Add natural transitions between sections
+
+2. Maintain consistency with the existing transcription style by:
+- Matching the professor's speaking patterns and tone
+- Using similar verbal cues and transitions
+- Keeping the same level of technical detail
+- Preserving the conversational teaching style
+
+3. When filling gaps, add authentic lecture elements:
+- Natural hesitations and thinking pauses
+- References to visual materials ("As you can see here...")
+- Real-time explanations of concepts
+- Impromptu examples and clarifications
+- Brief interactions with students
+
+4. Ensure technical accuracy by:
+- Cross-referencing with the source material
+- Maintaining mathematical precision
+- Preserving all important formulas and definitions
+- Keeping references to textbooks and citations
+
+Please highlight the filled-in sections using [brackets] so I can review the additions. Complete the transcription while maintaining the natural flow of the lecture.
+`
+
+export const DEFINE_SCAFFOLD_WITH_TRANSCRIPT = `Given the following transcript of a university lecture, generate a table of contents for a LaTeX document containing the lecture notes. The table of contents should be structured with sections and subsections as appropriate, based on the topics and subtopics discussed in the lecture.
+The first section must always be titled "\\section{Introduction}" and the last section must always be titled "\\section{Conclusion}".  Fill in the sections and subsections between the Introduction and Conclusion based on the content of the lecture transcript. Use your judgment to determine the appropriate level of detail for the table of contents (i.e. whether to include only sections, or also subsections, subsubsections, etc.) striving for clarity and logical organization.
+In general this should contain at least five to six sections. Each section on the other hand may or may not contain subsections but preferably yes.
+Please output only the table of contents, formatted as it would appear in a LaTeX document, starting with "\\section{Introduction}" and ending with "\\section{Conclusion}".`

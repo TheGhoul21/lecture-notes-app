@@ -17,9 +17,15 @@ const config = require('../utils/config');
 const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   SYSTEM_PROMPT_WITH_TRANSCRIPTIONS_MARKDOWN, SYSTEM_PROMPT_WITH_AUDIO, SECTION_REFINEMENT_PROMPT,
   FINAL_REFINEMENT_PROMPT_MARKDOWN, SECTION_REFINEMENT_PROMPT_MARKDOWN,
-  FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE, 
-  CHAT_WITH_TEACHER_PROMPT} = require("./prompts");
+  FINAL_REFINEMENT_PROMPT, FINAL_DOCUMENT_MESSAGE,
+  CHAT_WITH_TEACHER_PROMPT,
+  CHAT_WITH_COURSE_PROMPT,
+  DEFINE_SCAFFOLD_WITH_TRANSCRIPT,
+  HANDWRITTEN_NOTES_TO_TRANSCRIPT,
+  FILL_IN_GAPS_IN_TRANSCRIPT } = require("./prompts");
 const { LatexCompiler } = require("./latex");
+const { exec } = require('child_process');
+// const { queryVectorStore } = require("../rag/rag-service");
 
 const apiKey = config.geminiApiKey;
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -49,13 +55,43 @@ const generationConfig = {
   responseMimeType: "text/plain",
 };
 
+async function splitAudioIntoChunks(audioPath, chunkDuration = 600) {
+  const outputDir = path.join(path.dirname(audioPath), 'chunks');
+  await fs.mkdir(outputDir, { recursive: true });
+
+  return new Promise((resolve, reject) => {
+    exec(`ffmpeg -i ${audioPath} -f segment -segment_time ${chunkDuration} -c copy ${outputDir}/chunk_%03d.wav`, (error, stdout, stderr) => {
+      if (error) {
+        reject(`Error splitting audio: ${stderr}`);
+      } else {
+        resolve(outputDir);
+      }
+    });
+  });
+}
+
 async function generateTranscriptionFromAudio(audioPath) {
+  const chunkDir = await splitAudioIntoChunks(audioPath);
+  const chunkFiles = await fs.readdir(chunkDir);
+  const transcriptions = [];
+
+  for (const chunkFile of chunkFiles) {
+    const chunkPath = path.join(chunkDir, chunkFile);
+    const transcription = await generateTranscriptionFromAudioChunk(chunkPath);
+    transcriptions.push(transcription);
+  }
+
+  return transcriptions.join(' ');
+}
+async function generateTranscriptionFromAudioChunk(audioPath) {
+
 
   const files = [await uploadToGemini(audioPath, 'audio/wav')];
 
   const model = genAI.getGenerativeModel({
     model: "gemini-2.0-flash-exp",
     systemInstruction: "You are an expert lecture transcriber",
+    generationConfig: { temperature: 0 }
   });
 
   const textPart = {
@@ -82,7 +118,15 @@ async function generateTranscriptionFromAudio(audioPath) {
   return await response.response.text();
 }
 
-async function generateLatexFromTranscription(transcription, markdown = USE_MARKDOWN) {
+async function uploadFileAndGetDetails(filePath, mimeType) {
+  const file = await uploadToGemini(filePath, mimeType);
+  return {
+    mimeType: file.mimeType,
+    uri: file.uri,
+  };
+}
+
+async function generateLatexFromTranscription(transcription, scaffold, markdown = USE_MARKDOWN, additionalFiles=[]) {
 
   const model = genAI.getGenerativeModel({
     model: "gemini-exp-1206",
@@ -93,11 +137,42 @@ async function generateLatexFromTranscription(transcription, markdown = USE_MARK
     history: [],
   });
 
-  const result = await chatSession.sendMessage(transcription);
-  return result.response.text();
+  // const result = await chatSession.sendMessage();
+  let message = `Scaffold:\n${scaffold}\n\n\nTranscription:\n${transcription}`;
+  const responses = [];
+
+  const numberOfIterations = 5;
+
+  for (let i = 0; i < numberOfIterations; i++) {
+    const result = await chatSession.sendMessage([
+      {text:message},
+      ...additionalFiles.map(file => ({
+        fileData: {
+        mimeType: file.mimeType,
+        fileUri: file.uri,
+        },
+      }))
+    ])
+    message = "continue or just say ##STOP## if it's already completed";
+    const text = result.response.text().trim()
+    responses.push(text.replace("##STOP##", ""));
+
+    console.log("\n\n\nTEXT:\n", text)
+
+    console.log(text.slice(text.length - 20))
+    if (text.endsWith('STOP')) break;
+
+    if (text.includes("\\end\{document\}\n```")) break;
+
+    // responses.push(text.replace("##STOP##", ""));
+    if (text.includes("##STOP##")) break;
+  }
+
+
+  return responses.join('\n');
 }
 
-async function generateLatexFromAudio(audioPaths) {
+async function generateLatexFromAudio(audioPaths, mimeType = 'audio/wav') {
 
   const files = [];
   for (let path of audioPaths) {
@@ -156,7 +231,7 @@ async function getChatSessionForRefinement(transcription, document, markdown = U
   );
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: "gemini-exp-1206",//"gemini-2.0-flash-thinking-exp-01-21",
     systemInstruction: prompt,
   });
   const chatSession = model.startChat({
@@ -166,6 +241,26 @@ async function getChatSessionForRefinement(transcription, document, markdown = U
 
   return chatSession
 
+}
+
+
+async function generateScaffoldFromTranscription(transcription) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: DEFINE_SCAFFOLD_WITH_TRANSCRIPT,
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.2 },
+    history: [],
+  });
+
+
+  await chatSession.sendMessage(transcription);
+  await chatSession.sendMessage('Now double check your work and output a refined and corrected version');
+  const result = await chatSession.sendMessage('Now do a final check of your work and output the final and corrected version');
+
+  return result.response.text();
 }
 
 async function changeChatSessionModel(chatSession, newModel = 'gemini-exp-1206') {
@@ -183,19 +278,44 @@ async function sleep(ms) {
   })
 }
 
+async function retryWithExponentialBackoff(fn, maxRetries = 5) {
+  let retries = 0;
+  let delay = 1000; // Initial delay in milliseconds
 
-async function refineSection(chatSession, section) {
-  await sleep(1000);
+  while (retries < maxRetries) {
+    try {
+      return await fn();
+    } catch (error) {
+      console.error(error);
+      if (error.response && error.response.status === 429) {
+        retries++;
+        console.log(`Retrying after ${delay}ms... (${retries}/${maxRetries})`);
+        await sleep(delay);
+        delay *= 2 ** retries; // Exponential backoff
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`Failed after ${maxRetries} retries`);
+}
+async function refineSection(chatSession, section,additionalFiles=[]) {
   console.log("Refining", section.split("\n")[0], "with", chatSession.model);
-  const result = await chatSession.sendMessage(`${section}`)
+  const result = await retryWithExponentialBackoff(async () => chatSession.sendMessage([{text:`${section}`},...additionalFiles.map(file => ({
+    fileData: {
+    mimeType: file.mimeType,
+    fileUri: file.uri,
+    },
+  }))]))
   return result.response.text();
 }
 
-async function refineSections(originalTranscript, originalDocument, sections,markdown=USE_MARKDOWN) {
+async function refineSections(originalTranscript, originalDocument, sections, markdown = USE_MARKDOWN, additionalFiles=[]) {
   const chatSession = await getChatSessionForRefinement(originalTranscript, originalDocument);
 
   for (let section of sections) {
-    await refineSection(chatSession, section);
+    await refineSection(chatSession, section, additionalFiles);
   }
 
   const finalResponse = await refineSection(await /*changeChatSessionModel(chatSession, 'gemini-exp-1206')*/chatSession, FINAL_DOCUMENT_MESSAGE);
@@ -291,7 +411,7 @@ async function finalRefinement(document, markdown = USE_MARKDOWN) {
   console.log("Final refinement");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
+    model: "gemini-2.0-flash-exp", // model: "gemini-2.0-flash-thinking-exp-01-21",
     systemInstruction: prompt
   });
 
@@ -386,6 +506,138 @@ async function chatWithTranscription(chatSession, message) {
   return result.response.text();
 }
 
+async function startChatSessionWithCourse(context) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: CHAT_WITH_COURSE_PROMPT.replace('{context}', context),
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.4 },
+    history: [],
+  });
+
+
+  return chatSession;
+}
+
+async function updateChatSessionWithContext(chatSession, newContext) {
+  const updatedPrompt = CHAT_WITH_COURSE_PROMPT.replace('{context}', newContext);
+  const model = genAI.getGenerativeModel({
+    model: chatSession.model,
+    systemInstruction: updatedPrompt,
+  });
+
+  const updatedChatSession = model.startChat({
+    generationConfig: chatSession.params.generationConfig,
+    history: chatSession.history,
+  });
+
+  return updatedChatSession;
+}
+
+async function chatWithSession(chatSession, message) {
+  const newContext = await queryVectorStore(message, 5);
+
+  const result = await (await updateChatSessionWithContext(chatSession, newContext)).sendMessage(message);
+  return result.response.text();
+}
+
+async function generateReviewGuide(transcription) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: "You are an expert in creating review guides from lecture transcriptions.",
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.4 },
+    history: [],
+  });
+
+  const result = await chatSession.sendMessage(transcription);
+  return result.response.text();
+}
+
+async function generateFlashcards(transcription) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: "You are an expert in creating flashcards from lecture transcriptions.",
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.4 },
+    history: [],
+  });
+
+  const result = await chatSession.sendMessage(transcription);
+  return result.response.text();
+}
+
+async function generateQuestions(transcription) {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash-exp",
+    systemInstruction: "You are an expert in generating questions from lecture transcriptions.",
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature: 0.4 },
+    history: [],
+  });
+
+  const result = await chatSession.sendMessage(transcription);
+  return result.response.text();
+}
+
+
+
+async function processPdfWithGemini(pdfPath) {
+  await sleep(1000);
+
+  const initialTranscription = await callGeminiFlash(pdfPath, HANDWRITTEN_NOTES_TO_TRANSCRIPT, 0);
+
+  let refinedTranscription = initialTranscription;
+  const originalPdfFile = await uploadToGemini(pdfPath, 'application/pdf');
+  for (let i = 0; i < 2; i++) { // Limit iterations to avoid infinite loop
+    const newTranscription = (await callGeminiFlash(
+      [
+        {
+          fileData: {
+            mimeType: originalPdfFile.mimeType,
+            fileUri: originalPdfFile.uri,
+          },
+        },
+        {
+          text: refinedTranscription,
+        },
+      ],
+      FILL_IN_GAPS_IN_TRANSCRIPT,
+      0.2,
+      'gemini-2.0-flash-thinking-exp-01-21'
+    )).replaceAll(']', '').replaceAll('[', '').replaceAll("\n\n","\n").replaceAll("\n", " ");
+    // const newTranscription = await callGeminiFlash(refinedTranscription, FILL_IN_GAPS_IN_TRANSCRIPT, 0);
+    console.log('New length of transcription', newTranscription.length, "was", refinedTranscription.length, newTranscription.includes(']'))
+    refinedTranscription = newTranscription;
+    await sleep(1000);
+  }
+
+  return refinedTranscription.replace(']', '').replace('[', '');
+}
+
+async function callGeminiFlash(input, systemPrompt, temperature, modelName = "gemini-2.0-flash-exp") {
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction: systemPrompt,
+  });
+
+  const chatSession = model.startChat({
+    generationConfig: { ...generationConfig, temperature },
+    history: [],
+  });
+
+  const result = await chatSession.sendMessage(input);
+  return result.response.text();
+}
+
 module.exports = {
   generateTranscriptionFromAudio,
   generateLatexFromTranscription,
@@ -397,5 +649,11 @@ module.exports = {
   extractMarkdown,
   convertLatexToMarkdown,
   startChatSessionWithLesson,
-  chatWithTranscription
+  startChatSessionWithCourse,
+  chatWithSession,
+  chatWithTranscription,
+  generateFlashcards, generateQuestions, generateReviewGuide,
+  generateScaffoldFromTranscription,
+  processPdfWithGemini,
+  uploadFileAndGetDetails
 };

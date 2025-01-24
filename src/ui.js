@@ -8,14 +8,14 @@ async function selectVideoFiles(files) {
             acc[date] = [];
         }
 
-        const formattedDate = new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString();
+        const formattedDate = date.length == 8 ? new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString() : date;
         acc[date].push({...file, date:formattedDate});
         return acc;
     }, {});
 
     const choices = Object.keys(groupedFiles).sort().map((date, index) => ({
         
-        name: `L${String(index + 1).padStart(2, '0')} - ${new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString()}`,
+        name: `L${String(index + 1).padStart(2, '0')} - ${date.length != 8?date:new Date(date.slice(0, 4), date.slice(4, 6) - 1, date.slice(6, 8)).toLocaleDateString()}`,
         value: date,
     }));
 
@@ -61,7 +61,7 @@ function groupFilesByDate(choices) {
 
 function extractDateFromFileName(fileName) {
     const dateMatch = fileName.match(/(\d{8})/); // Matches 8 digits (YYYYMMDD)
-    return dateMatch ? dateMatch[1] : null;
+    return dateMatch ? dateMatch[1] : fileName;
 }
 
 
@@ -104,7 +104,7 @@ async function showProcessedVideos(videos) {
 
 async function chatWithLesson(video) {
     return import('chalk').then(async ({default:chalk}) => {
-        const { startChatSessionWithLesson, chatWithTranscription } = require('./gemini/gemini-service');
+        const { startChatSessionWithLesson, chatWithTranscription, chatWithSession } = require('./gemini/gemini-service');
 
         const chatSession = await startChatSessionWithLesson(video.transcription);
         const response = await chatWithTranscription(chatSession, "/help");
@@ -129,6 +129,34 @@ async function chatWithLesson(video) {
 }
 
 
+
+async function chatWithCourse() {
+    return import('chalk').then(async ({default:chalk}) => {
+        const { chatWithSession, startChatSessionWithCourse } = require('./gemini/gemini-service');
+
+        const chatSession = await startChatSessionWithCourse("");
+        const response = await chatWithSession(chatSession, "/help");
+            console.log(chalk.blue('AI Response:'), response);
+
+        while (true) {
+            const { message } = await inquirer.default.prompt({
+                type: 'input',
+                name: 'message',
+                message: 'You:'
+            });
+
+            if (message.toUpperCase() === 'QUIT') {
+                console.log(chalk.red('Exiting chat session.'));
+                break;
+            }
+
+            const response = await chatWithSession(chatSession, message);
+            console.log(chalk.blue('AI Response:'), response);
+        }
+    });
+}
+
+
 async function showVideoDetails(video) {
     return import('chalk').then(async ({default:chalk}) => {
         console.log(chalk.blue('\n--- Video Details ---'));
@@ -146,4 +174,4 @@ async function showVideoDetails(video) {
 }
 
 
-module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, chatWithLesson };
+module.exports = { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, chatWithLesson, chatWithCourse };
