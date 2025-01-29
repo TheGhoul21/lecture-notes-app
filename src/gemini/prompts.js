@@ -450,32 +450,35 @@ Consider the function <span class="math-inline">f\\(x\\) \\= x^2</span>. At the 
 
 
 export const SECTION_REFINEMENT_PROMPT = `
-You are a LaTeX expert tasked with improving academic documents. You will be given:
-1. A LaTeX section needing refinement.
-2. The full lesson/lecture transcript.
+You are a LaTeX expert tasked with improving academic documents. You will receive:
+1. A section needing refinement
+2. A reference transcript
 
-Your task:
-- Refine structure, improve mathematical clarity, and enhance algorithms using proper environments (e.g., \\begin{algorithm}, \\State).
-- Convert informal pseudocode into structured algorithms, include complexity analysis, and add line numbers where needed.
-- Turn text descriptions into TikZ diagrams, ensuring proper scaling, node placement, and labeling.
-- Use pgfplots for graphs with proper labels, legends, and scaling.
-- Box important content using tcolorbox (always using the \`breakable\` option) or mdframed with appropriate emphasis and spacing. **Remember to enclose the title of tcolorboxes in curly brackets {} if they contain special characters like commas, semicolons, etc.**
-- Implement cross-referencing with \label, \ref, and \hyperref.
-- Use the full transcript to ensure all relevant information is included and described clearly in the document. Add any missing details, expand on ambiguous points, and clarify unclear statements from the transcript.
-- Ensure consistent styling, clarity, and use of standard packages (algorithm, tikz, pgfplots, tcolorbox, mdframed).
-- Make sure that everything in the section is correct; otherwise, fix it.
-- **Crucially, if you determine that a given section covers multiple distinct topics or concepts that would benefit from being treated as separate sections, split the original section into appropriate sections with clear titles and logical flow. Maintain consistent numbering and cross-referencing across the newly created sections. Ensure the new section titles accurately reflect the content from the transcript. Only do this if the content genuinely warrants separate sections, not simply to add more sections.**
-- Minimize extraneous text; be concise and focused.
-- NEVER FOR ANY REASON WHATSOEVER ADD new commands. YOU ALWAYS USE THE EXPLICIT VERSION. NEVER. UNDERSTOOD? NEVER.
+Tasks:
+- Validate and correct all content against the reference transcript
+- Fix any mathematical, theoretical, or conceptual errors
+- Add missing crucial information
+- Present all content directly without referencing sources
+- Use proper LaTeX environments and formatting:
+  - \\begin{algorithm} with \\State for algorithms
+  - Include complexity analysis
+  - TikZ for diagrams
+  - pgfplots for graphs
+  - tcolorbox (with \`breakable\`) or mdframed for emphasis
+  - Cross-references via \\label and \\ref
+- Split into subsections if warranted by content complexity
+- Never define new LaTeX commands (\\newcommand, \\renewcommand, etc.) - always use the explicit LaTeX constructs
+- Condense and rewrite the text into clear, concise, and structured academic lecture notes, removing conversational filler and repetitions.
 
-Original lesson transcript:
+<transcript>
 {original_transcript}
+</transcript>
 
-Original document:
+<document>
 {original_document}
+</document>
 
-You will be given the name of the section. For each section, you need to output *only that section* refined. If you split the section into subsections, output all the generated subsections.
-
+Output only the refined section(s), including any new subsections.
 `;
 
 export const FINAL_DOCUMENT_MESSAGE = "final refined complete document";
@@ -623,9 +626,6 @@ export const HANDWRITTEN_NOTES_TO_TRANSCRIPT = `Please convert these handwritten
 - Add verbal emphasis on key points
 
 The transcription should flow as if the professor is actively teaching from these notes and book excerpts, explaining concepts in real-time while referencing visual materials.
-
-Output example:
-So, we were talking about the reinforcement learning. So, the new concept, the new ingredient is this. Is this reinforcement learning, which is a way to interact with the system in order to build a strategy. A strategy meaning a way to avoid the use of some supervised, some collection of information that can in general be used in in supervised learning. So this is the first non supervised learning. Is a sort of intermediate way between unsupervised, completely unsupervised and supervised. We've been discussing briefly what are the ingredients for the for this kind of of 
 `
 
 export const FILL_IN_GAPS_IN_TRANSCRIPT = `I have a partial lecture transcription and the original source material (PDF with handwritten notes and book screenshots). The transcription has some gaps due to audio issues during recording. Please:
@@ -659,6 +659,12 @@ Please highlight the filled-in sections using [brackets] so I can review the add
 `
 
 export const DEFINE_SCAFFOLD_WITH_TRANSCRIPT = `Given the following transcript of a university lecture, generate a table of contents for a LaTeX document containing the lecture notes. The table of contents should be structured with sections and subsections as appropriate, based on the topics and subtopics discussed in the lecture.
-The first section must always be titled "\\section{Introduction}" and the last section must always be titled "\\section{Conclusion}".  Fill in the sections and subsections between the Introduction and Conclusion based on the content of the lecture transcript. Use your judgment to determine the appropriate level of detail for the table of contents (i.e. whether to include only sections, or also subsections, subsubsections, etc.) striving for clarity and logical organization.
-In general this should contain at least five to six sections. Each section on the other hand may or may not contain subsections but preferably yes.
+The first section must always be titled "\\section{Introduction}" and the last section must always be titled "\\section{Conclusion}".  Fill in the sections and some subsections between the Introduction and Conclusion based on the content of the lecture transcript. Use your judgment to determine the appropriate level of detail for the table of contents (i.e. whether to include only sections, or also subsections, subsubsections, etc.) striving for clarity and logical organization.
+In general this should contain at least three sections. Each section on the other hand may or may not contain subsections but preferably yes.
 Please output only the table of contents, formatted as it would appear in a LaTeX document, starting with "\\section{Introduction}" and ending with "\\section{Conclusion}".`
+
+
+export const DEFINE_SCAFFOLD_WITH_TRANSCRIPT_MARKDOWN = `Given the following transcript of a university lecture, generate a table of contents for a Markdown document containing the lecture notes. The table of contents should be structured with sections and subsections as appropriate, based on the topics and subtopics discussed in the lecture.
+The first section must always be titled "Introduction" (using Markdown's # heading) and the last section must always be titled "Conclusion" (using Markdown's # heading).  Fill in the sections and subsections between the Introduction and Conclusion based on the content of the lecture transcript. Use your judgment to determine the appropriate level of detail for the table of contents (i.e. whether to include only sections, or also subsections, subsubsections, etc.) striving for clarity and logical organization.
+In general this should contain at least five to six sections. Each section on the other hand may or may not contain subsections but preferably yes.
+Please output only the table of contents, formatted as it would appear in a Markdown document, starting with "# Introduction" and ending with "# Conclusion". Use Markdown heading syntax (e.g., # for sections, ## for subsections, ### for subsubsections).`;

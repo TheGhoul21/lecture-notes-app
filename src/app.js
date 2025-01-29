@@ -2,7 +2,7 @@ const { authorize } = require('./auth/google-auth');
 const { listVideoFiles, downloadFile, listPDFFiles } = require('./drive/drive-utils');
 const { extractAudio } = require('./transcription/audio-extraction');
 const { transcribeAudio } = require('./transcription/transcription-service');
-const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex, convertLatexToMarkdown, generateScaffoldFromTranscription,processPdfWithGemini, uploadFileAndGetDetails,...geminiService } = require('./gemini/gemini-service');
+const { generateLatexFromTranscription, generateLatexFromAudio, refineSections, finalRefinement, extractLatex, convertLatexToMarkdown, generateScaffoldFromTranscription,processPdfWithGemini, uploadFileAndGetDetails, USE_MARKDOWN, extractMarkdown, ...geminiService } = require('./gemini/gemini-service');
 const { addProcessedVideo, getProcessedVideos, getProcessedVideo, closeDB, getProcessedVideoByFileId } = require('./db/database');
 const { selectVideoFiles, showProcessedVideos, showVideoDetails, groupFilesByDate, ...ui } = require('./ui');
 const path = require('path');
@@ -51,30 +51,65 @@ async function selectSections(sections) {
 // src/app.js
 
 function splitTranscription(transcription) {
-  const preambleRegex = /\\documentclass.*?\\begin{document}/s;
-  const preambleMatch = transcription.match(preambleRegex);
-  let content = transcription;
-  if (preambleMatch) {
-    content = transcription.substring(preambleMatch[0].length);
+  // Helper function to detect if the string is LaTeX or Markdown
+  function detectFormat(input) {
+    if (/\\documentclass|\\begin\{document\}/.test(input)) {
+      return "latex";
+    } else if (/^(#+\s|\s*-{3,}|\s*={3,})/.test(input)) {
+      return "markdown";
+    }
+    return "unknown";
   }
 
+  // Extract sections for LaTeX format
+  function extractLatexSections(input) {
+    const preambleRegex = /\\documentclass.*?\\begin{document}/s;
+    const preambleMatch = input.match(preambleRegex);
+    let content = input;
+    if (preambleMatch) {
+      content = input.substring(preambleMatch[0].length);
+    }
 
-  const endDocumentIndex = content.indexOf("\\end{document}");
-  if (endDocumentIndex !== -1) {
-    content = content.substring(0, endDocumentIndex);
+    const endDocumentIndex = content.indexOf("\\end{document}");
+    if (endDocumentIndex !== -1) {
+      content = content.substring(0, endDocumentIndex);
+    }
+
+    const sectionRegex = /(\\section\{[^{}]*\}[\s\S]*?)(?=\\section\{|\s*\\end{document}|$)/g;
+    const sections = [];
+    let match;
+    while ((match = sectionRegex.exec(content)) !== null) {
+      sections.push(match[1].trim());
+    }
+
+    return sections.filter(section => section.trim() !== '');
   }
 
-
-  const sectionRegex = /(\\section\{[^{}]*\}[\s\S]*?)(?=\\section\{|\s*\\end{document}|$)/g;
-
-  const sections = [];
-  let match;
-  while ((match = sectionRegex.exec(content)) !== null) {
-    sections.push(match[1].trim());
+  // Extract sections for Markdown format
+  function extractMarkdownSections(input) {
+    const sectionRegex = /(^#{1,2}\s.*$)([\s\S]*?)(?=^#+\s|\s*$)/gm;
+    const sections = [];
+    let match;
+    while ((match = sectionRegex.exec(input)) !== null) {
+      const header = match[1].trim();
+      const body = match[2].trim();
+      sections.push(`${header}\n${body}`);
+    }
+    return sections.filter(section => section.trim() !== '');
   }
 
-  return sections.filter(section => section.trim() !== '');
+  // Determine the format and extract sections accordingly
+  const format = detectFormat(transcription);
+  switch (format) {
+    case "latex":
+      return extractLatexSections(transcription);
+    case "markdown":
+      return extractMarkdownSections(transcription);
+    default:
+      throw new Error("Unsupported format: Input must be LaTeX or Markdown.");
+  }
 }
+
 
 async function refineProcessedVideo() {
   await ensureTempDir();
@@ -82,7 +117,6 @@ async function refineProcessedVideo() {
   const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to refine');
 
   if (!selectedVideoId) return;
-
   const video = await getProcessedVideo(selectedVideoId);
   if (!video) {
     console.log("video not found");
@@ -203,7 +237,7 @@ async function convertVideToMarkdown() {
 
 
 async function refineSelectedSections(video, selectedSections, additionalFiles=[]) {
-  let finalLatex = extractLatex(await refineSections(video.transcription, extractLatex(video.latex_output), selectedSections.map(({ section }) => section),false,additionalFiles));
+  let finalLatex = extractLatex(await refineSections(video.transcription, extractLatex(video.latex_output), selectedSections.map(({ section }) => section),USE_MARKDOWN,additionalFiles));
 
   await addProcessedVideo(video.file_id, video.file_name, video.latex_output, video.transcription, finalLatex);
 
@@ -318,11 +352,11 @@ async function processPdfs() {
       const wholeTranscription = transcriptions.join('\n');
       const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
       console.log(wholeTranscription, scaffold)
-      const latexOutput = await generateLatexFromTranscription(wholeTranscription, scaffold, false, additionalFiles);
+      const latexOutput = await generateLatexFromTranscription(wholeTranscription, scaffold, USE_MARKDOWN, additionalFiles);
       console.log({latexOutput});
       await addProcessedVideo(lastPdf.id, lastPdf.name, latexOutput, wholeTranscription, '');
 
-      const refinedLatex = extractLatex(latexOutput);
+      const refinedLatex = (USE_MARKDOWN ? extractMarkdown : extractLatex)(latexOutput);
       const sections = splitTranscription(refinedLatex);
       const video = await getProcessedVideoByFileId(lastPdf.id);
       await refineSelectedSections(video, sections.map(section => ({ section })),additionalFiles);
@@ -495,8 +529,34 @@ async function processTranscriptVideos(authClient, selectedVideos, transcription
   const wholeTranscription = transcriptions.join('\n')
   console.log(`Generating scaffold`)
   const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
+  await geminiService.sleep(5000);
   console.log(`Generating document`)
   return await addProcessedVideo(lastVideo.id, lastVideo.name, await generateLatexFromTranscription(wholeTranscription, scaffold), transcriptions.join('\n'), '');
+}
+
+
+async function regenerateDocument() {
+
+
+  await ensureTempDir();
+  const processedVideos = await getProcessedVideos();
+  const selectedVideoId = await showProcessedVideos(processedVideos, 'Select a video to refine');
+
+  if (!selectedVideoId) return;
+  const video = await getProcessedVideo(selectedVideoId);
+  if (!video) {
+    console.log("video not found");
+    return;
+  }
+
+  const wholeTranscription = video.transcription;
+
+  console.log(`Generating scaffold`)
+  const scaffold = await generateScaffoldFromTranscription(wholeTranscription);
+  await geminiService.sleep(5000);
+  console.log(`Generating document`)
+  return await addProcessedVideo(video.file_id, video.file_name, await generateLatexFromTranscription(wholeTranscription, scaffold), wholeTranscription, '');
+
 }
 
 async function manualInsert() {
@@ -618,6 +678,7 @@ async function main() {
           { name: 'Process PDF files', value: 'process_pdf' },
           { name: 'Process new videos (audio)', value: 'process_audio' },
           { name: 'Process new videos (video)', value: 'process_video' },
+          { name: 'Redo processed video', value: 'redo' },
           { name: 'Refine a processed video', value: 'refine' },
           { name: 'Convert to markdown a processed video', value: 'markdown' },
           { name: 'Compile refined', value: 'compile' },
@@ -642,6 +703,9 @@ async function main() {
           break;
         case 'process_video':
           await processVideos('video');
+          break;
+        case 'redo':
+          await regenerateDocument();
           break;
         case 'refine':
           await refineProcessedVideo();

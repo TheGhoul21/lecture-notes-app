@@ -1,9 +1,4 @@
-const {
-  GoogleGenerativeAI,
-  HarmCategory,
-  HarmBlockThreshold,
-  ChatSession,
-} = require("@google/generative-ai");
+const { GoogleGenerativeAI} = require("@google/generative-ai");
 const { GoogleAIFileManager } = require("@google/generative-ai/server");
 
 
@@ -22,7 +17,8 @@ const { SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   CHAT_WITH_COURSE_PROMPT,
   DEFINE_SCAFFOLD_WITH_TRANSCRIPT,
   HANDWRITTEN_NOTES_TO_TRANSCRIPT,
-  FILL_IN_GAPS_IN_TRANSCRIPT } = require("./prompts");
+  FILL_IN_GAPS_IN_TRANSCRIPT, 
+  DEFINE_SCAFFOLD_WITH_TRANSCRIPT_MARKDOWN} = require("./prompts");
 const { LatexCompiler } = require("./latex");
 const { exec } = require('child_process');
 // const { queryVectorStore } = require("../rag/rag-service");
@@ -129,7 +125,7 @@ async function uploadFileAndGetDetails(filePath, mimeType) {
 async function generateLatexFromTranscription(transcription, scaffold, markdown = USE_MARKDOWN, additionalFiles=[]) {
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-exp-1206",
+    model: "gemini-2.0-flash-thinking-exp-01-21",
     systemInstruction: markdown ? SYSTEM_PROMPT_WITH_TRANSCRIPTIONS_MARKDOWN : SYSTEM_PROMPT_WITH_TRANSCRIPTIONS,
   });
   const chatSession = model.startChat({
@@ -191,7 +187,7 @@ async function generateLatexFromAudio(audioPaths, mimeType = 'audio/wav') {
 
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-exp-1206",
+    model: "gemini-2.0-flash-thinking-exp-01-21",
     systemInstruction: SYSTEM_PROMPT_WITH_AUDIO,
   });
   const chatSession = model.startChat({
@@ -235,7 +231,7 @@ async function getChatSessionForRefinement(transcription, document, markdown = U
     systemInstruction: prompt,
   });
   const chatSession = model.startChat({
-    generationConfig: { ...generationConfig, temperature: 0.4 },
+    generationConfig: { ...generationConfig, temperature: 0.2 },
     history: [],
   });
 
@@ -244,10 +240,10 @@ async function getChatSessionForRefinement(transcription, document, markdown = U
 }
 
 
-async function generateScaffoldFromTranscription(transcription) {
+async function generateScaffoldFromTranscription(transcription, markdown=USE_MARKDOWN) {
   const model = genAI.getGenerativeModel({
     model: "gemini-2.0-flash-exp",
-    systemInstruction: DEFINE_SCAFFOLD_WITH_TRANSCRIPT,
+    systemInstruction: markdown?DEFINE_SCAFFOLD_WITH_TRANSCRIPT_MARKDOWN:DEFINE_SCAFFOLD_WITH_TRANSCRIPT,
   });
 
   const chatSession = model.startChat({
@@ -263,7 +259,7 @@ async function generateScaffoldFromTranscription(transcription) {
   return result.response.text();
 }
 
-async function changeChatSessionModel(chatSession, newModel = 'gemini-exp-1206') {
+async function changeChatSessionModel(chatSession, newModel = 'gemini-2.0-flash-thinking-exp-01-21') {
   const params = chatSession.params;
   const model = genAI.getGenerativeModel({
     model: newModel,
@@ -316,11 +312,12 @@ async function refineSections(originalTranscript, originalDocument, sections, ma
 
   for (let section of sections) {
     await refineSection(chatSession, section, additionalFiles);
+    await sleep(3000);
   }
 
-  const finalResponse = await refineSection(await /*changeChatSessionModel(chatSession, 'gemini-exp-1206')*/chatSession, FINAL_DOCUMENT_MESSAGE);
+  const finalResponse = await refineSection(await /*changeChatSessionModel(chatSession, 'gemini-2.0-flash-thinking-exp-01-21')*/chatSession, FINAL_DOCUMENT_MESSAGE);
 
-  let refinedDocument = extractLatex(finalResponse);
+  let refinedDocument = (markdown ? extractMarkdown: extractLatex)(finalResponse);
 
   const MAX_TRIES = 5;
   let current = 1;
@@ -329,14 +326,14 @@ async function refineSections(originalTranscript, originalDocument, sections, ma
     while (!refinedDocument.includes("\\end{document}")) {
       const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
       console.log(continuationResponse);
-      refinedDocument += extractLatex(continuationResponse);
+      refinedDocument += (markdown ? extractMarkdown: extractLatex)(continuationResponse);
 
       current++;
       if (current == MAX_TRIES) {
         break;
       }
     }
-  }
+  } 
 
   return refinedDocument
 }
@@ -411,19 +408,19 @@ async function finalRefinement(document, markdown = USE_MARKDOWN) {
   console.log("Final refinement");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp", // model: "gemini-2.0-flash-thinking-exp-01-21",
+    model: "gemini-exp-1206", // model: "gemini-2.0-flash-thinking-exp-01-21",
     systemInstruction: prompt
   });
 
   const chatSession = model.startChat({
-    generationConfig: { ...generationConfig, temperature: 0.5 },
+    generationConfig: { ...generationConfig, temperature: 0.2 },
     history: [],
   });
 
   const result = await chatSession.sendMessage(document)
   const finalResponse = result.response.text();
 
-  let refinedDocument = extractLatex(finalResponse);
+  let refinedDocument = (markdown ? extractMarkdown: extractLatex)(finalResponse);
 
   const MAX_TRIES = 5;
   let current = 1;
@@ -432,12 +429,19 @@ async function finalRefinement(document, markdown = USE_MARKDOWN) {
     while (!refinedDocument.includes("\\end{document}")) {
       const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response");
       console.log(continuationResponse);
-      refinedDocument += extractLatex(continuationResponse);
+      refinedDocument += (markdown ? extractMarkdown: extractLatex)(continuationResponse);
 
       current++;
       if (current == MAX_TRIES) {
         break;
       }
+    }
+  } else {
+    while (!refinedDocument.includes("END_OF_DOCUMENT")) {
+      const continuationResponse = await refineSection(chatSession, "continue exactly from where you stopped and complete the response. When finished, add END_OF_DOCUMENT on a new line");
+      refinedDocument += (markdown ? extractMarkdown: extractLatex)(continuationResponse);
+      current++;
+      if (current == MAX_TRIES) break;
     }
   }
   return refinedDocument;
@@ -594,10 +598,11 @@ async function processPdfWithGemini(pdfPath) {
   await sleep(1000);
 
   const initialTranscription = await callGeminiFlash(pdfPath, HANDWRITTEN_NOTES_TO_TRANSCRIPT, 0);
+  console.log({initialTranscription})
 
   let refinedTranscription = initialTranscription;
   const originalPdfFile = await uploadToGemini(pdfPath, 'application/pdf');
-  for (let i = 0; i < 2; i++) { // Limit iterations to avoid infinite loop
+  for (let i = 0; i < 3; i++) { // Limit iterations to avoid infinite loop
     const newTranscription = (await callGeminiFlash(
       [
         {
@@ -611,11 +616,12 @@ async function processPdfWithGemini(pdfPath) {
         },
       ],
       FILL_IN_GAPS_IN_TRANSCRIPT,
-      0.2,
+      0,
       'gemini-2.0-flash-thinking-exp-01-21'
     )).replaceAll(']', '').replaceAll('[', '').replaceAll("\n\n","\n").replaceAll("\n", " ");
     // const newTranscription = await callGeminiFlash(refinedTranscription, FILL_IN_GAPS_IN_TRANSCRIPT, 0);
     console.log('New length of transcription', newTranscription.length, "was", refinedTranscription.length, newTranscription.includes(']'))
+    console.log({newTranscription})
     refinedTranscription = newTranscription;
     await sleep(1000);
   }
@@ -655,5 +661,7 @@ module.exports = {
   generateFlashcards, generateQuestions, generateReviewGuide,
   generateScaffoldFromTranscription,
   processPdfWithGemini,
-  uploadFileAndGetDetails
+  uploadFileAndGetDetails,
+  USE_MARKDOWN,
+  sleep
 };
